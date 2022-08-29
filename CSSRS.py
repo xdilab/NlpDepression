@@ -153,6 +153,10 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         vocab_sizes = []
         embed_matrices = []
 
+    es = EarlyStopping(monitor='val_auc', mode="max", patience=10, min_delta=0)
+    mc = ModelCheckpoint(f"{emb_type}_{modelType}_best_model.h5", monitor='val_auc', mode='max', verbose=0,
+                         save_best_only=True)
+
     if param_tune == True:
         param_grid = hyperparameters
         tpe_trials = Trials()
@@ -161,13 +165,15 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         if modelType == "cnn":
             objectiveFunc = partial(objectiveFunctionCNN, num_channels=number_channels,num_features=number_features,
                                     Xtrain=modelTrain, ytrain=y_train_fold, Xtest=modelTest, ytest=y_test_fold,
-                                    num_label=num_labels, e_type=emb_type, max_length=max_length, know_infus_bool=know_infus_bool,
-                                    vocabSize=vocab_sizes, embedding_matrix=embed_matrices)
+                                    num_label=num_labels, modelType = modelType, e_type=emb_type, max_length=max_length,
+                                    know_infus_bool=know_infus_bool, vocabSize=vocab_sizes, embedding_matrix=embed_matrices,
+                                    es=es, mc=mc)
         elif modelType == "GRU":
-            objectiveFunc = partial(objectiveFunctionGRU, num_channels=number_channels, num_features=number_features, emb_dim=embed_dimen,
+            objectiveFunc = partial(objectiveFunctionGRU, num_channels=number_channels, num_features=number_features,emb_dim=embed_dimen,
                                     Xtrain=modelTrain, ytrain=y_train_fold, Xtest=modelTest, ytest=y_test_fold,
-                                    n_lab=num_labels, e_type=emb_type, max_length=max_length, know_infus_bool=know_infus_bool,
-                                    vocabSize=vocab_sizes, embedding_matrix=embed_matrices)
+                                    n_lab=num_labels, e_type=emb_type, modelType = modelType, max_length=max_length,
+                                    know_infus_bool=know_infus_bool, vocabSize=vocab_sizes, embedding_matrix=embed_matrices,
+                                    es=es, mc=mc)
 
         tpe_best = fmin(fn=objectiveFunc, space=param_grid, algo=tpe.suggest,
                         max_evals=global_max_evals, trials=tpe_trials)
@@ -186,25 +192,16 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
     es = EarlyStopping(monitor='val_auc', mode="max", patience=10, min_delta=0)
     mc = ModelCheckpoint(f"{emb_type}_{modelType}_best_model.h5", monitor='val_auc', mode='max', verbose=0, save_best_only=True)
 
-    if know_infus_bool == True:
-        history = nnModel.fit(modelTrain, y_train_fold,
-                              validation_data=(modelTrain, y_train_fold),
-                              epochs=hyperparameters["epochs"],
-                              batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
-                              verbose=1)
-        nnModel = load_model(f'{emb_type}_{modelType}_best_model.h5')
-        scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
-        y_pred_proba = nnModel.predict(modelTest)
 
-    else:
-        history = nnModel.fit(modelTrain, y_train_fold,
-                              validation_data= (modelTrain, y_train_fold),
-                              epochs=hyperparameters["epochs"],
-                              batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
-                              verbose=1)
-        nnModel = load_model(f'{emb_type}_{modelType}_best_model.h5')
-        scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
-        y_pred_proba = nnModel.predict(modelTest)
+    history = nnModel.fit(modelTrain, y_train_fold,
+                          validation_data=(modelTrain, y_train_fold),
+                          epochs=hyperparameters["epochs"],
+                          batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
+                          verbose=2)
+    nnModel = load_model(f'{emb_type}_{modelType}_best_model.h5')
+    scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
+    y_pred_proba = nnModel.predict(modelTest)
+
 
     return nnModel, history, scores, y_pred_proba, hyperparameters
 
@@ -461,7 +458,7 @@ def main():
     split = False
     cross_validation = True
     smote_bool = True
-    parameter_tune = False
+    parameter_tune = True
     if parameter_tune == True:
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
                       "batch_size": hp.choice("batch_size", [4, 24, 32])}

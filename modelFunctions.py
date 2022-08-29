@@ -35,32 +35,26 @@ def denseNN(param_grid, Xtrain, ytrain, X_test, y_test, num_labels):
     dense.summary()
     return loss
 
-def objectiveFunctionCNN(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, num_label, e_type, know_infus_bool,
-                         max_length = 512, vocabSize = [], embedding_matrix = []):
-    modelType = "cnn"
-    es = EarlyStopping(monitor='val_auc', patience=10, mode='max', min_delta=0)
-    mc = ModelCheckpoint(f"{e_type}_{modelType}_best_model.h5", monitor='val_auc', mode='max', verbose=0, save_best_only=True)
+def objectiveFunctionCNN(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, num_label, modelType, e_type, know_infus_bool,
+                         es, mc, max_length = 512, vocabSize = [], embedding_matrix = []):
 
     model = cnnModel(param_grid, num_channels, num_features, num_label, e_type, know_infus_bool, max_length, vocabSize, embedding_matrix)
-    model.fit(Xtrain, ytrain, validation_data=(Xtrain, ytrain), epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], callbacks=[es, mc], verbose=1)
+    model.fit(Xtrain, ytrain, validation_data=(Xtrain, ytrain), epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], callbacks=[es, mc], verbose=0)
     loss, accuracy, auc_values = model.evaluate(Xtest, ytest, verbose=2)
     return loss
 
 def objectiveFunctionLSTM(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, num_label, e_type, max_length = 512, vocabSize = 0, embedding_matrix = []):
     model = LSTM_mod(param_grid, num_channels, num_features, num_label, e_type, max_length, vocabSize, embedding_matrix)
-    model.fit(Xtrain, ytrain, epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], verbose=1)
+    model.fit(Xtrain, ytrain, epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], verbose=2)
     loss, accuracy = model.evaluate(Xtest, ytest, verbose=2)
     return loss
 
 
-def objectiveFunctionGRU(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, n_lab, e_type, emb_dim,
-                         know_infus_bool, preTrainDim = 300, max_length = 512, vocabSize = [], embedding_matrix = []):
-    modelType = "GRU"
-    es = EarlyStopping(monitor='val_auc', patience=10, mode='max', min_delta=0)
-    mc = ModelCheckpoint(f"{e_type}_{modelType}_best_model.h5", monitor='val_auc', mode='max', verbose=0, save_best_only=True)
+def objectiveFunctionGRU(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, n_lab, modelType, e_type, emb_dim,
+                         know_infus_bool, es, mc, preTrainDim = 300, max_length = 512, vocabSize = [], embedding_matrix = []):
 
     model = GRUModel(param_grid, num_channels, num_features, n_lab, e_type, know_infus_bool, emb_dim, preTrainDim, max_length, vocabSize, embedding_matrix)
-    model.fit(Xtrain, ytrain, validation_data=(Xtrain, ytrain), epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], callbacks=[es, mc], verbose=1)
+    model.fit(Xtrain, ytrain, validation_data=(Xtrain, ytrain), epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], callbacks=[es, mc], verbose=0)
     loss, accuracy, auc_values = model.evaluate(Xtest, ytest, verbose=2)
     return loss
 
