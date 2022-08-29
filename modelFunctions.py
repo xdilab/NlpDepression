@@ -43,17 +43,11 @@ def objectiveFunctionCNN(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels,
     loss, accuracy, auc_values = model.evaluate(Xtest, ytest, verbose=2)
     return loss
 
-def objectiveFunctionLSTM(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, num_label, e_type, max_length = 512, vocabSize = 0, embedding_matrix = []):
-    model = LSTM_mod(param_grid, num_channels, num_features, num_label, e_type, max_length, vocabSize, embedding_matrix)
-    model.fit(Xtrain, ytrain, epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], verbose=2)
-    loss, accuracy = model.evaluate(Xtest, ytest, verbose=2)
-    return loss
 
-
-def objectiveFunctionGRU(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, n_lab, modelType, e_type, emb_dim,
+def objectiveFunctionRNN(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, n_lab, modelType, e_type, emb_dim,
                          know_infus_bool, es, mc, preTrainDim = 300, max_length = 512, vocabSize = [], embedding_matrix = []):
 
-    model = GRUModel(param_grid, num_channels, num_features, n_lab, e_type, know_infus_bool, emb_dim, preTrainDim, max_length, vocabSize, embedding_matrix)
+    model = RNNModel(param_grid, num_channels, num_features, n_lab, e_type, modelType, know_infus_bool, emb_dim, preTrainDim, max_length, vocabSize, embedding_matrix)
     model.fit(Xtrain, ytrain, validation_data=(Xtrain, ytrain), epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], callbacks=[es, mc], verbose=0)
     loss, accuracy, auc_values = model.evaluate(Xtest, ytest, verbose=2)
     return loss
@@ -201,43 +195,7 @@ def cnnModel2(num_channels, num_features, num_labels, e_type):
     cnn.summary()
     return cnn
 
-def LSTM_mod(param_grid, num_channels, num_features, n_lab, e_type, max_length = 512, vocabSize = 0, embedding_matrix = []):
-
-    bilstm_path = "bilstm"
-
-    pool_size = 2
-
-    if e_type == "BERT":
-        input_shape = Input(shape=(num_channels, num_features))
-        bidirect = Bidirectional(LSTM(20, return_sequences=True, dropout=0.25, recurrent_dropout=0.2))(input_shape)
-
-    elif e_type == "ConceptNet":
-        input_shape = Input(shape=(max_length,))
-        e = Embedding(vocabSize, 300, embeddings_initializer=Constant(embedding_matrix), input_length=max_length, trainable=False)(input_shape)
-        bidirect = Bidirectional(LSTM(20, return_sequences=True, dropout=0.25, recurrent_dropout=0.2))(e)
-    maxpool = MaxPooling1D(pool_size=pool_size)(bidirect)
-    flatLayer = Flatten()(maxpool)
-    denseLayer = Dense(10, activation='relu', kernel_initializer='he_uniform')(flatLayer)
-    if n_lab == 2:
-        outLayer = Dense(2, activation='sigmoid')(flatLayer)
-        bilstm = Model(input_shape, outLayer)
-        bilstm.compile(optimizer='adam',
-                       loss='binary_crossentropy',
-                       metrics=['accuracy'])
-    else:
-        outLayer = Dense(n_lab, activation='softmax')(flatLayer)
-        bilstm = Model(input_shape, outLayer)
-        bilstm.compile(optimizer='adam',
-                       loss='sparse_categorical_crossentropy',
-                       metrics=['accuracy'])
-
-
-    mc = ModelCheckpoint(bilstm_path + ".h5", monitor='val_accuracy', mode='max', verbose=1, save_best_only=True)
-
-    bilstm.summary()
-    return bilstm
-
-def GRUModel(param_grid, num_channels, num_features, num_label, e_type, know_infus_bool, emb_dim, preTrainDim = 300,
+def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelType, know_infus_bool, emb_dim, preTrainDim = 300,
                  max_length = 512, vocabSize = [], embedding_matrix =[]):
 
     metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
@@ -261,21 +219,30 @@ def GRUModel(param_grid, num_channels, num_features, num_label, e_type, know_inf
         input_shape = Input(shape=(max_length,))
         emb = Embedding(vocabSize[con_index], preTrainDim, embeddings_initializer=Constant(embedding_matrix[con_index]),
                         input_length=max_length, trainable=False)(input_shape)
-        embGRU = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
 
-    embAtt = Attention(dropout=0.25)([embGRU, embGRU])
+        if modelType == "GRU":
+            embRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
+        elif modelType == "LSTM":
+            embRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
+
+    embAtt = Attention(dropout=0.25)([embRNN, embRNN])
 
     if know_infus_bool == True:
         isa_input = Input(shape=(max_length,))
         aff_input = Input(shape=(max_length,))
 
         isa = Embedding(vocabSize[isa_index], 100, embeddings_initializer=Constant(embedding_matrix[isa_index]), input_length=max_length, trainable=False)(isa_input)
-        isaGRU = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
-        isaAtt = Attention(dropout=0.25)([isaGRU, isaGRU])
-
         aff = Embedding(vocabSize[aff_index], 100, embeddings_initializer=Constant(embedding_matrix[aff_index]), input_length=max_length,trainable=False)(aff_input)
-        affGRU = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
-        affAtt = Attention(dropout=0.25)([affGRU, affGRU])
+
+        if modelType == "GRU":
+            isaRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
+            affRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
+        elif modelType == "LSTM":
+            isaRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
+            affRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
+
+        isaAtt = Attention(dropout=0.25)([isaRNN, isaRNN])
+        affAtt = Attention(dropout=0.25)([affRNN, affRNN])
 
         merged = Concatenate(axis=-1)([embAtt, isaAtt, affAtt])
         flattened = Flatten()(merged)

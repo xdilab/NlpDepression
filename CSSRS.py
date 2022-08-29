@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 
 from Libraries import *
-from modelFunctions import denseNN, cnnModel, cnnModel2, LSTM_mod, objectiveFunctionCNN, objectiveFunctionLSTM, \
-    GRUModel, objectiveFunctionGRU
+from modelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, RNNModel, objectiveFunctionRNN
 from HelperFunctions import getEmbeddings,bert_encode, getTokens, getLabels, extractList, \
     getXfromBestModelfromTrials, getStatistics, printPredictions, printOverallResults, onehotEncode, getSummStats
 
@@ -168,8 +167,8 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                                     num_label=num_labels, modelType = modelType, e_type=emb_type, max_length=max_length,
                                     know_infus_bool=know_infus_bool, vocabSize=vocab_sizes, embedding_matrix=embed_matrices,
                                     es=es, mc=mc)
-        elif modelType == "GRU":
-            objectiveFunc = partial(objectiveFunctionGRU, num_channels=number_channels, num_features=number_features,emb_dim=embed_dimen,
+        elif modelType == "GRU" or modelType == "LSTM":
+            objectiveFunc = partial(objectiveFunctionRNN, num_channels=number_channels, num_features=number_features,emb_dim=embed_dimen,
                                     Xtrain=modelTrain, ytrain=y_train_fold, Xtest=modelTest, ytest=y_test_fold,
                                     n_lab=num_labels, e_type=emb_type, modelType = modelType, max_length=max_length,
                                     know_infus_bool=know_infus_bool, vocabSize=vocab_sizes, embedding_matrix=embed_matrices,
@@ -184,14 +183,9 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
     if modelType == "cnn":
         nnModel = cnnModel(hyperparameters, number_channels, number_features, num_labels, emb_type, know_infus_bool,
                            max_length, vocab_sizes, embed_matrices)
-    elif modelType == "GRU":
-        nnModel = GRUModel(hyperparameters, number_channels, number_features, num_labels, emb_type, know_infus_bool, embed_dimen, preTrainDim,
-                           max_length, vocab_sizes, embed_matrices)
-
-
-    es = EarlyStopping(monitor='val_auc', mode="max", patience=10, min_delta=0)
-    mc = ModelCheckpoint(f"{emb_type}_{modelType}_best_model.h5", monitor='val_auc', mode='max', verbose=0, save_best_only=True)
-
+    elif modelType == "GRU" or modelType == "LSTM":
+        nnModel = RNNModel(hyperparameters, number_channels, number_features, num_labels, emb_type, modelType, know_infus_bool,
+                           embed_dimen, preTrainDim, max_length, vocab_sizes, embed_matrices)
 
     history = nnModel.fit(modelTrain, y_train_fold,
                           validation_data=(modelTrain, y_train_fold),
@@ -443,11 +437,12 @@ def main():
         filePath = r"/ddn/home12/r3102/files/500_Reddit_users_posts_labels.csv"
         outputPath = r"/ddn/home12/r3102/results"
 
-    embeddingType = "BERT"
-    # embeddingType = "ConceptNet"
+    # embeddingType = "BERT"
+    embeddingType = "ConceptNet"
 
-    modtype = "cnn"
+    # modtype = "cnn"
     # modtype = "GRU"
+    modtype = "LSTM"
 
     knowledgeInfusion = True
     # knowledgeInfusion = False
