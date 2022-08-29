@@ -64,7 +64,7 @@ def cnnModel(param_grid, num_channels, num_features, num_label, e_type, know_inf
     num_labels
         number of labels
     """
-    cnn_path = "cnn"
+    cnn_path = "CNN"
     metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
     if num_label == 2:
         loss = 'binary_crossentropy'
@@ -146,7 +146,7 @@ def cnnModel(param_grid, num_channels, num_features, num_label, e_type, know_inf
 
     cnn.summary()
     if platform.system() != "Linux":
-        dot_img_file = f'cnn_{e_type}.png'
+        dot_img_file = f'CNN_{e_type}.png'
         tf.keras.utils.plot_model(cnn, to_file=dot_img_file, show_shapes=False,show_layer_names=False)
     return cnn
 
@@ -171,7 +171,7 @@ def cnnModel2(num_channels, num_features, num_labels, e_type):
 
     cnn = Sequential()
 
-    cnn_path = "cnn"
+    cnn_path = "CNN"
 
     filters = 3
     kernal = 2

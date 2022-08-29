@@ -161,7 +161,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         tpe_trials = Trials()
         tpe_best = []
 
-        if modelType == "cnn":
+        if modelType == "CNN":
             objectiveFunc = partial(objectiveFunctionCNN, num_channels=number_channels,num_features=number_features,
                                     Xtrain=modelTrain, ytrain=y_train_fold, Xtest=modelTest, ytest=y_test_fold,
                                     num_label=num_labels, modelType = modelType, e_type=emb_type, max_length=max_length,
@@ -180,7 +180,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         print("Best: ", getXfromBestModelfromTrials(tpe_trials, 'loss'), hyperparameters)
 
 
-    if modelType == "cnn":
+    if modelType == "CNN":
         nnModel = cnnModel(hyperparameters, number_channels, number_features, num_labels, emb_type, know_infus_bool,
                            max_length, vocab_sizes, embed_matrices)
     elif modelType == "GRU" or modelType == "LSTM":
@@ -440,9 +440,9 @@ def main():
     # embeddingType = "BERT"
     embeddingType = "ConceptNet"
 
-    # modtype = "cnn"
+    modtype = "CNN"
     # modtype = "GRU"
-    modtype = "LSTM"
+    # modtype = "LSTM"
 
     knowledgeInfusion = True
     # knowledgeInfusion = False
