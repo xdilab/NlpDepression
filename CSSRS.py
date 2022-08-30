@@ -384,12 +384,8 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
         endTime = datetime.now()
         elapsedTime = endTime - startTime
 
-        if num_labels == 4:
-            printOverallResults(outputPath, "OverallResults 4Label.csv", num_labels,emb_type,max_length, smoteBool, split_Bool,
-                                number_of_folds, modelType, know_infus_bool, overallResults, fold_hyper, elapsedTime, whole_results, fold_results)
-        elif num_labels == 5:
-            printOverallResults(outputPath, "OverallResults 5Label.csv", num_labels, emb_type, max_length, smoteBool, split_Bool,
-                                number_of_folds, modelType, know_infus_bool, overallResults, fold_hyper, elapsedTime, whole_results, fold_results)
+        printOverallResults(outputPath, f"OverallResults {num_labels}Label.csv", num_labels,emb_type,max_length, smoteBool, split_Bool,
+                            number_of_folds, modelType, know_infus_bool, param_tune, overallResults, fold_hyper, elapsedTime, whole_results, fold_results)
 
     # No CV Folds
     else:
@@ -419,14 +415,10 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
         # printPredictions(y_test, y_pred, num_labels, outputPath)
         endTime = datetime.now()
         elapsedTime = endTime - startTime
-        if num_labels == 4:
-            printOverallResults(outputPath, "OverallResults 4Label (no CV).csv", num_labels, emb_type, max_length, smoteBool,
-                                split_Bool, number_of_folds, modelType, know_infus_bool, overallResults, hyperparameters,
-                                elapsedTime, whole_results, fold_results)
-        elif num_labels == 5:
-            printOverallResults(outputPath, "OverallResults 5Label (no CV).csv", num_labels, emb_type, max_length, smoteBool,
-                                split_Bool, number_of_folds, modelType, know_infus_bool, overallResults, hyperparameters,
-                                elapsedTime, whole_results, fold_results)
+
+        printOverallResults(outputPath, f"OverallResults {num_labels}Label (no CV).csv", num_labels, emb_type, max_length, smoteBool,
+                            split_Bool, number_of_folds, modelType, know_infus_bool, param_tune, overallResults, hyperparameters,
+                            elapsedTime, whole_results, fold_results)
 
 
 def main():
@@ -461,7 +453,11 @@ def main():
         param_grid = {"epochs": 50,
                       "batch_size": 4}
     maxLength = 512
-
+    print(f"Embedding Type: {embeddingType}")
+    print(f"Model Type: {modtype}")
+    print(f"{'No' if knowledgeInfusion == False else 'with'} Knowledge Infusion")
+    print(f"{'No' if parameter_tune == False else 'with'} Parameter Tuning")
+    print("-----------------------------------")
     runModel(outputPath, filePath, modtype, knowledgeInfusion, embeddingType, maxLength, num_labels, emb_dim, split, cross_validation,
              parameter_tune, smote_bool, param_grid, number_of_folds)
 

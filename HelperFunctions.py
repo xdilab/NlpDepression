@@ -141,13 +141,14 @@ def mergeDicts(list_of_dicts):
     return(first_dict)
 
 def printOverallResults(outputPath, fileName, n_label, emb_type, max_length, SMOTE_bool, splitBool, numCV, model_type,
-                        know_infus_bool, stats, hyperparameters, execTime, whole_results, fold_results):
+                        know_infus_bool, parameter_tune_bool, stats, hyperparameters, execTime, whole_results, fold_results):
     if numCV != 5:
         outputPath = os.path.join(outputPath, f"[{numCV} Folds]")
 
     hours, minutes, seconds = str(execTime).split(":")
     results = pd.DataFrame({"Number of labels":n_label, "Embedding":emb_type, "Max Sentence Length":max_length,
-                            "Model":model_type, "Knowledge Infusion": know_infus_bool, "SMOTE":SMOTE_bool, "CV Folds":numCV,
+                            "Model":model_type, "Knowledge Infusion": know_infus_bool, "SMOTE":SMOTE_bool,
+                            "Parameter Tuning":parameter_tune_bool ,"CV Folds":numCV,
                             "Macro Average":stats["accuracy"],"Precision":stats["macro avg"]["precision"],
                             "Recall":stats["macro avg"]["recall"],"F1-score":stats["macro avg"]["f1-score"],
                             "AUC":stats["auc"], "New False Positive Rate":stats["graded_fp"],
@@ -177,14 +178,14 @@ def printOverallResults(outputPath, fileName, n_label, emb_type, max_length, SMO
     if numCV == 5:
         if n_label == 4:
             results = results[["QID", "Number of labels", "Embedding", "Max Sentence Length", "Model", "Knowledge Infusion",
-                               "SMOTE", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy","Label 2 Accuracy","Label 3 Accuracy",
+                               "SMOTE", "Parameter Tuning", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy","Label 2 Accuracy","Label 3 Accuracy",
                                "Macro Average","Precision", "Recall","F1-score", "AUC", "New False Positive Rate","New False Negative Rate",
                            "Ordinal Error", "Fold 1 Hyperparameters", "Fold 2 Hyperparameters", "Fold 3 Hyperparameters",
                                "Fold 4 Hyperparameters","Fold 5 Hyperparameters", "Execution Time", "random.seed", "np seed",
                                "tf seed", "train_test split seed", "SMOTE seed", "KFold seed"]]
         elif n_label == 5:
             results = results[["QID", "Number of labels", "Embedding", "Max Sentence Length", "Model", "Knowledge Infusion",
-                               "SMOTE", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy", "Label 3 Accuracy",
+                               "SMOTE", "Parameter Tuning", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy", "Label 3 Accuracy",
                                "Label 4 Accuracy","Macro Average", "Precision", "Recall", "F1-score", "AUC", "New False Positive Rate",
                            "New False Negative Rate", "Ordinal Error", "Fold 1 Hyperparameters", "Fold 2 Hyperparameters",
                                "Fold 3 Hyperparameters","Fold 4 Hyperparameters","Fold 5 Hyperparameters", "Execution Time",
