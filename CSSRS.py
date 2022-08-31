@@ -384,7 +384,7 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
         endTime = datetime.now()
         elapsedTime = endTime - startTime
 
-        printOverallResults(outputPath, f"OverallResults {num_labels}Label.csv", num_labels,emb_type,max_length, smoteBool, split_Bool,
+        printOverallResults(outputPath, f"New OverallResults {num_labels}Label.csv", num_labels,emb_type,max_length, smoteBool, split_Bool,
                             number_of_folds, modelType, know_infus_bool, param_tune, overallResults, fold_hyper, elapsedTime, whole_results, fold_results)
 
     # No CV Folds
@@ -448,10 +448,12 @@ def main():
     parameter_tune = True
     if parameter_tune == True:
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
-                      "batch_size": hp.choice("batch_size", [4, 24, 32])}
+                      "batch_size": hp.choice("batch_size", [4, 24, 32]),
+                      "dropout": hp.choice("droupout", [0.1, 0.2, 0.3, 0.4, 0.5])}
     else:
         param_grid = {"epochs": 50,
-                      "batch_size": 4}
+                      "batch_size": 4,
+                      "dropout": 0.3}
     maxLength = 512
     print(f"Embedding Type: {embeddingType}")
     print(f"Model Type: {modtype}")
@@ -461,7 +463,7 @@ def main():
     runModel(outputPath, filePath, modtype, knowledgeInfusion, embeddingType, maxLength, num_labels, emb_dim, split, cross_validation,
              parameter_tune, smote_bool, param_grid, number_of_folds)
 
-global_max_evals = 15
+global_max_evals = 30
 if platform.system() == "Windows":
     numberbatch_path = r"D:\Summer 2022 Project\numberbatch-en.txt"
     isacore_path = r"D:\Summer 2022 Project\isacore\isacore.csv"

@@ -130,7 +130,7 @@ def cnnModel(param_grid, num_channels, num_features, num_label, e_type, know_inf
 
 
     merged = Flatten()(merged)
-    merged = Dropout(0.3)(merged)
+    merged = Dropout(param_grid["dropout"])(merged)
     if num_label == 2:
         out = Dense(num_label, activation='sigmoid')(merged)
     else:
