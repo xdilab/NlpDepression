@@ -140,7 +140,7 @@ def cnnModel(param_grid, num_channels, num_features, num_label, e_type, know_inf
         cnn = Model([input_shape, isa_input, aff_input], out)
     else:
         cnn = Model(input_shape, out)
-    cnn.compile(optimizer=Adam(learning_rate=0.001),
+    cnn.compile(optimizer=Adam(learning_rate=param_grid["learning_rate"]),
               loss=loss,
               metrics=metrics)
 
@@ -214,7 +214,10 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
 
     if e_type == "BERT":
         input_shape = Input(shape=(num_channels, num_features))
-        embGRU = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
+        if modelType == "GRU":
+            embRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
+        elif modelType == "LSTM":
+            embRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
     elif e_type == "ConceptNet":
         input_shape = Input(shape=(max_length,))
         emb = Embedding(vocabSize[con_index], preTrainDim, embeddings_initializer=Constant(embedding_matrix[con_index]),
@@ -260,7 +263,7 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
     else:
         nMod = Model(input_shape, out)
 
-    nMod.compile(optimizer=Adam(learning_rate=0.001),
+    nMod.compile(optimizer=Adam(learning_rate=param_grid["learning_rate"]),
                    loss=loss,
                    metrics=metrics)
 

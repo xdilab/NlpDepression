@@ -152,8 +152,10 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         vocab_sizes = []
         embed_matrices = []
 
+    checkpointName = f"{emb_type}_{modelType}_best_model.h5"
+
     es = EarlyStopping(monitor='val_auc', mode="max", patience=10, min_delta=0)
-    mc = ModelCheckpoint(f"{emb_type}_{modelType}_best_model.h5", monitor='val_auc', mode='max', verbose=0,
+    mc = ModelCheckpoint(checkpointName, monitor='val_auc', mode='max', verbose=0,
                          save_best_only=True)
 
     if param_tune == True:
@@ -192,7 +194,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                           epochs=hyperparameters["epochs"],
                           batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
                           verbose=2)
-    nnModel = load_model(f'{emb_type}_{modelType}_best_model.h5')
+    nnModel = load_model(checkpointName)
     scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
     y_pred_proba = nnModel.predict(modelTest)
 
@@ -445,15 +447,17 @@ def main():
     split = False
     cross_validation = True
     smote_bool = True
-    parameter_tune = True
+    parameter_tune = False
     if parameter_tune == True:
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
                       "batch_size": hp.choice("batch_size", [4, 24, 32]),
-                      "dropout": hp.choice("droupout", [0.1, 0.2, 0.3, 0.4, 0.5])}
+                      "dropout": hp.choice("droupout", [0.1, 0.2, 0.3, 0.4, 0.5]),
+                      "learning_rate":hp.hoice("learning_rate", [0.01, 0.005, 0.001])}
     else:
-        param_grid = {"epochs": 50,
-                      "batch_size": 4,
-                      "dropout": 0.3}
+        param_grid = {"epochs": 10,
+                      "batch_size": 32,
+                      "dropout": 0.3,
+                      "learning_rate":0.01}
     maxLength = 512
     print(f"Embedding Type: {embeddingType}")
     print(f"Model Type: {modtype}")
