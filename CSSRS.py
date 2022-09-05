@@ -452,12 +452,14 @@ def main():
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
                       "batch_size": hp.choice("batch_size", [4, 24, 32]),
                       "dropout": hp.choice("droupout", [0.1, 0.2, 0.3, 0.4, 0.5]),
-                      "learning_rate":hp.hoice("learning_rate", [0.01, 0.005, 0.001])}
+                      "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001]),
+                      "rnn_nodes": hp.choice("rnn_nodes", [128, 256])}
     else:
         param_grid = {"epochs": 10,
                       "batch_size": 32,
                       "dropout": 0.3,
-                      "learning_rate":0.01}
+                      "learning_rate":0.001,
+                      "rnn_nodes":256}
     maxLength = 512
     print(f"Embedding Type: {embeddingType}")
     print(f"Model Type: {modtype}")

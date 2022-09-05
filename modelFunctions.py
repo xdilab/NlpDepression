@@ -215,18 +215,18 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
     if e_type == "BERT":
         input_shape = Input(shape=(num_channels, num_features))
         if modelType == "GRU":
-            embRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
+            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
         elif modelType == "LSTM":
-            embRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
+            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
     elif e_type == "ConceptNet":
         input_shape = Input(shape=(max_length,))
         emb = Embedding(vocabSize[con_index], preTrainDim, embeddings_initializer=Constant(embedding_matrix[con_index]),
                         input_length=max_length, trainable=False)(input_shape)
 
         if modelType == "GRU":
-            embRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
+            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
         elif modelType == "LSTM":
-            embRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
+            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
 
     embAtt = Attention(dropout=0.25)([embRNN, embRNN])
 
@@ -238,11 +238,11 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
         aff = Embedding(vocabSize[aff_index], 100, embeddings_initializer=Constant(embedding_matrix[aff_index]), input_length=max_length,trainable=False)(aff_input)
 
         if modelType == "GRU":
-            isaRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
-            affRNN = Bidirectional(GRU(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
+            isaRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
+            affRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
         elif modelType == "LSTM":
-            isaRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
-            affRNN = Bidirectional(LSTM(128, return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
+            isaRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
+            affRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
 
         isaAtt = Attention(dropout=0.25)([isaRNN, isaRNN])
         affAtt = Attention(dropout=0.25)([affRNN, affRNN])
