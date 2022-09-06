@@ -194,6 +194,8 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                           epochs=hyperparameters["epochs"],
                           batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
                           verbose=2)
+
+    tf.keras.backend.clear_session()
     nnModel = load_model(checkpointName)
     scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
     y_pred_proba = nnModel.predict(modelTest)
@@ -369,6 +371,8 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
             print(matrix)
             #Increase Fold Number
             fold_num = fold_num + 1
+
+            tf.keras.backend.clear_session()
         # == Provide average scores ==
         print('------------------------------------------------------------------------')
         print('Score per fold')
@@ -434,8 +438,8 @@ def main():
     # embeddingType = "BERT"
     embeddingType = "ConceptNet"
 
-    modtype = "CNN"
-    # modtype = "GRU"
+    #modtype = "CNN"
+    modtype = "GRU"
     # modtype = "LSTM"
 
     knowledgeInfusion = True
@@ -459,7 +463,7 @@ def main():
                       "batch_size": 32,
                       "dropout": 0.3,
                       "learning_rate":0.001,
-                      "rnn_nodes":256}
+                      "rnn_nodes":128}
     maxLength = 512
     print(f"Embedding Type: {embeddingType}")
     print(f"Model Type: {modtype}")

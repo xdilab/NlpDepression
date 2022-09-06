@@ -160,10 +160,10 @@ def printOverallResults(outputPath, fileName, n_label, emb_type, max_length, SMO
         results[f"Label {i} Accuracy"]  = stats[str(i)]["acc"]
 
     if splitBool == True:
-        results[f"Hyperparameters"] = str(list(hyperparameters.items()))
+        results[f"Hyperparameters"] = str(sorted(list(hyperparameters[i].items()), key=lambda x: x[0][0]))
     else:
         for i in range(numCV):
-            results[f"Fold {i+1} Hyperparameters"] = str(list(hyperparameters[i].items()))
+            results[f"Fold {i+1} Hyperparameters"] = str(sorted(list(hyperparameters[i].items()), key=lambda x: x[0][0]))
 
     file_path = os.path.join(outputPath, fileName)
 
