@@ -253,9 +253,9 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
         flattened = Flatten()(embAtt)
 
     dense1 = Dense(300, activation='relu', kernel_initializer='he_uniform')(flattened)
-    drop1 = Dropout(0.25)(dense1)
+    drop1 = Dropout(param_grid["dropout"])(dense1)
     dense2 = Dense(100, activation='relu', kernel_initializer='he_uniform')(drop1)
-    drop2 = Dropout(0.25)(dense2)
+    drop2 = Dropout(param_grid["dropout"])(dense2)
     out = Dense(num_label, activation='softmax')(drop2)
 
     if know_infus_bool == True:

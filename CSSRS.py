@@ -181,6 +181,9 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         hyperparameters = space_eval(param_grid, tpe_best)
         print("Best: ", getXfromBestModelfromTrials(tpe_trials, 'loss'), hyperparameters)
 
+    print("--------------------")
+    print(hyperparameters)
+    print("--------------------")
 
     if modelType == "CNN":
         nnModel = cnnModel(hyperparameters, number_channels, number_features, num_labels, emb_type, know_infus_bool,
