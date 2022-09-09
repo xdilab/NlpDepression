@@ -252,9 +252,9 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
     else:
         flattened = Flatten()(embAtt)
 
-    dense1 = Dense(300, activation='relu', kernel_initializer='he_uniform')(flattened)
+    dense1 = Dense(param_grid["1st_dense"], activation='relu', kernel_initializer='he_uniform')(flattened)
     drop1 = Dropout(param_grid["dropout"])(dense1)
-    dense2 = Dense(100, activation='relu', kernel_initializer='he_uniform')(drop1)
+    dense2 = Dense(param_grid["2nd_dense"], activation='relu', kernel_initializer='he_uniform')(drop1)
     drop2 = Dropout(param_grid["dropout"])(dense2)
     out = Dense(num_label, activation='softmax')(drop2)
 

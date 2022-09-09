@@ -461,12 +461,14 @@ def main():
                       "dropout": hp.choice("droupout", [0.1, 0.2, 0.3, 0.4, 0.5]),
                       "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001]),
                       "rnn_nodes": hp.choice("rnn_nodes", [128, 256])}
-    else:
-        param_grid = {"epochs": 10,
-                      "batch_size": 32,
-                      "dropout": 0.3,
-                      "learning_rate":0.001,
-                      "rnn_nodes":128}
+    else:                                        #Default Values
+        param_grid = {"batch_size": 32,          #32
+                      "dropout": 0.25,           #0.25 for RNN, 0.3 for CNN
+                      "epochs": 10,              #10
+                      "learning_rate":0.001,     #0.001
+                      "rnn_nodes":128,           #128
+                      "1st_dense":300,           #300
+                      "2nd_dense":300}           #100
     maxLength = 512
     print(f"Embedding Type: {embeddingType}")
     print(f"Model Type: {modtype}")
