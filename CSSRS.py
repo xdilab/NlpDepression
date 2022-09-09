@@ -199,6 +199,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                           verbose=2)
 
     tf.keras.backend.clear_session()
+    tf.random.set_seed(seed)
     nnModel = load_model(checkpointName)
     scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
     y_pred_proba = nnModel.predict(modelTest)
@@ -376,6 +377,7 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
             fold_num = fold_num + 1
 
             tf.keras.backend.clear_session()
+            tf.random.set_seed(seed)
         # == Provide average scores ==
         print('------------------------------------------------------------------------')
         print('Score per fold')
@@ -490,4 +492,5 @@ elif platform.system() == "Linux":
 
 # glove_100d_path = r"D:\Summer 2022 Project\glove.6B.100d.txt"
 preTrainDim = 300
+seed = 99
 main()
