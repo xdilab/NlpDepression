@@ -85,7 +85,12 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
     # Applying SMOTE to training set
     # Random seed set for now to make sure all pipelines overfit the same way
     if smoteBool == True:
-        over = SMOTE(random_state=SMOTE_random_seed)
+        valueCounts = pd.Series(y_train_fold.numpy()).value_counts()
+        # y_train_fold.value_counts()
+        over = SMOTE(sampling_strategy={0:valueCounts[0],
+                                        1:valueCounts[1],
+                                        2:math.ceil(valueCounts[0]*0.8),
+                                        3:math.ceil(valueCounts[0]*0.8)},random_state=SMOTE_random_seed)
         steps = [('o', over)]
         pipeline = Pipeline(steps=steps)
         if emb_type == "BERT":
@@ -443,19 +448,21 @@ def main():
     # embeddingType = "BERT"
     embeddingType = "ConceptNet"
 
-    #modtype = "CNN"
+    # modtype = "CNN"
     modtype = "GRU"
     # modtype = "LSTM"
 
-    knowledgeInfusion = True
-    # knowledgeInfusion = False
+    # knowledgeInfusion = True
+    knowledgeInfusion = False
+
+    smote_bool = True
+    # smote_bool = False
 
     num_labels = 4
     emb_dim = "3d"
     number_of_folds = 5
     split = False
     cross_validation = True
-    smote_bool = True
     parameter_tune = False
     if parameter_tune == True:
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
@@ -466,11 +473,11 @@ def main():
     else:                                        #Default Values
         param_grid = {"batch_size": 32,          #32
                       "dropout": 0.25,           #0.25 for RNN, 0.3 for CNN
-                      "epochs": 10,              #10
+                      "epochs": 3,              #10
                       "learning_rate":0.001,     #0.001
                       "rnn_nodes":128,           #128
                       "1st_dense":300,           #300
-                      "2nd_dense":300}           #100
+                      "2nd_dense":100}           #100
     maxLength = 512
     print(f"Embedding Type: {embeddingType}")
     print(f"Model Type: {modtype}")

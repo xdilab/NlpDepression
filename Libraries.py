@@ -7,6 +7,7 @@ import seaborn as sns
 import os
 import random
 import ast
+import math
 # import keras
 import platform
 if platform.system() == "Windows":
@@ -41,6 +42,7 @@ seed = 99
 random.seed(seed)
 np.random.seed(seed)
 tf.random.set_seed(seed)
+torch.manual_seed(seed)
 # tf.keras.utils.set_random_seed #Equivalent to above 3
 
 split_random_seed = 24 #Used for train/test split
