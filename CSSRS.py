@@ -6,7 +6,7 @@ from HelperFunctions import getEmbeddings,bert_encode, getTokens, getLabels, ext
     getXfromBestModelfromTrials, getStatistics, printPredictions, printOverallResults, onehotEncode, getSummStats
 
 def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length, num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
-            smoteBool, hyperparameters, number_of_folds, fold_num, X_train_fold, y_train_fold, X_test_fold, y_test_fold, embToken,
+            smoteBool, weightBool, hyperparameters, number_of_folds, fold_num, X_train_fold, y_train_fold, X_test_fold, y_test_fold, embToken,
             isacore_Embeddings = {}, affectiveSpace_Embeddings = {}):
 
     if emb_type == "BERT":
@@ -86,11 +86,13 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
     # Random seed set for now to make sure all pipelines overfit the same way
     if smoteBool == True:
         valueCounts = pd.Series(y_train_fold.numpy()).value_counts()
+        print("Before:", valueCounts)
         # y_train_fold.value_counts()
-        over = SMOTE(sampling_strategy={0:valueCounts[0],
-                                        1:valueCounts[1],
-                                        2:math.ceil(valueCounts[0]*0.8),
-                                        3:math.ceil(valueCounts[0]*0.8)},random_state=SMOTE_random_seed)
+        # over = SMOTE(sampling_strategy={0:valueCounts[0],
+        #                                 1:valueCounts[0],
+        #                                 2:math.ceil(valueCounts[0]*1.2),
+        #                                 3:math.ceil(valueCounts[0]*1.2)},random_state=SMOTE_random_seed)
+        over = SMOTE(random_state=SMOTE_random_seed)
         steps = [('o', over)]
         pipeline = Pipeline(steps=steps)
         if emb_type == "BERT":
@@ -109,7 +111,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                 con_train_tokens, _ = pipeline.fit_resample(con_train_tokens, y_train_fold)
                 isa_train_tokens, _ = pipeline.fit_resample(isa_train_tokens, y_train_fold)
                 aff_train_tokens, y_train_fold = pipeline.fit_resample(aff_train_tokens, y_train_fold)
-
+            print("After:", pd.Series(y_train_fold).value_counts())
     # Convert to BERT embeddings for BERT models
     # Rename tokens for ConceptNet models for simplicity of coding
     if emb_type == "BERT":
@@ -126,15 +128,12 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
 
     X_train_emb_fold = tf.convert_to_tensor(X_train_emb_fold)
     X_test_emb_fold = tf.convert_to_tensor(X_test_emb_fold)
+
     if know_infus_bool == True:
         isa_train_tokens = tf.convert_to_tensor(isa_train_tokens)
         isa_test_tokens = tf.convert_to_tensor(isa_test_tokens)
         aff_train_tokens = tf.convert_to_tensor(aff_train_tokens)
         aff_test_tokens = tf.convert_to_tensor(aff_test_tokens)
-
-    # One-hot encode labels
-    y_train_fold = onehotEncode(y_train_fold)
-    y_test_fold = onehotEncode(y_test_fold)
 
     if know_infus_bool == True:
         modelTrain = [X_train_emb_fold, isa_train_tokens, aff_train_tokens]
@@ -156,6 +155,28 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
     elif know_infus_bool == False and emb_type == "BERT":
         vocab_sizes = []
         embed_matrices = []
+
+    if weightBool == True:
+        # Generate class weights & One-hot encode labels
+        print("\nClass weight")
+        num_classes = len(pd.Series(y_train_fold.numpy()).unique())
+        onehot = pd.get_dummies(pd.Series(y_train_fold.numpy()), drop_first=False)
+        class_counts = onehot.sum(axis=0).values
+        total_count = sum(class_counts)
+        class_rate = [(total_count / (num_classes * x)) for x in class_counts]
+        class_weights = dict(enumerate(class_rate))
+        print("num_classes: ", num_classes, "class_counts: ", class_counts, "total_count: ", total_count,
+              "class_weights: ", class_weights)
+
+        y_train_fold = convert_to_tensor(onehot)
+        onehotTest = pd.get_dummies(pd.Series(y_test_fold.numpy()), drop_first=False)
+        y_test_fold = convert_to_tensor(onehotTest)
+    else:
+        onehot = pd.get_dummies(pd.Series(y_train_fold.numpy()), drop_first=False)
+        y_train_fold = convert_to_tensor(onehot)
+        onehotTest = pd.get_dummies(pd.Series(y_test_fold.numpy()), drop_first=False)
+        y_test_fold = convert_to_tensor(onehotTest)
+
 
     checkpointName = f"{emb_type}_{modelType}_best_model.h5"
 
@@ -197,11 +218,19 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         nnModel = RNNModel(hyperparameters, number_channels, number_features, num_labels, emb_type, modelType, know_infus_bool,
                            embed_dimen, preTrainDim, max_length, vocab_sizes, embed_matrices)
 
-    history = nnModel.fit(modelTrain, y_train_fold,
-                          validation_data=(modelTrain, y_train_fold),
-                          epochs=hyperparameters["epochs"],
-                          batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
-                          verbose=2)
+    if weightBool == True:
+        history = nnModel.fit(modelTrain, y_train_fold,
+                              validation_data=(modelTrain, y_train_fold),
+                              epochs=hyperparameters["epochs"],
+                              batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
+                              class_weight=class_weights,verbose=2)
+    else:
+
+        history = nnModel.fit(modelTrain, y_train_fold,
+                              validation_data=(modelTrain, y_train_fold),
+                              epochs=hyperparameters["epochs"],
+                              batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
+                              verbose=2)
 
     tf.keras.backend.clear_session()
     tf.random.set_seed(seed)
@@ -213,7 +242,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
     return nnModel, history, scores, y_pred_proba, hyperparameters
 
 def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length, num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
-             smoteBool, hyperparameters, number_of_folds):
+             smoteBool, weightBool, hyperparameters, number_of_folds):
 
     if tf.test.gpu_device_name():
         print('GPU: {}'.format(tf.test.gpu_device_name()))
@@ -330,7 +359,7 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
             if know_infus_bool == True:
                 nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length,
                                                                                   num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
-                                                                                  smoteBool, hyperparameters, number_of_folds, fold_num,
+                                                                                  smoteBool, weightBool, hyperparameters, number_of_folds, fold_num,
                                                                                   X_train_fold, y_train_fold, X_test_fold, y_test_fold,
                                                                                   embToken, isacore_Embeddings, affectiveSpace_Embeddings)
             else:
@@ -338,7 +367,7 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
                                                                                   emb_type, max_length,
                                                                                   num_labels, embed_dimen, split_Bool,
                                                                                   CV_Bool, param_tune,
-                                                                                  smoteBool, hyperparameters,
+                                                                                  smoteBool, weightBool, hyperparameters,
                                                                                   number_of_folds, fold_num,
                                                                                   X_train_fold, y_train_fold,
                                                                                   X_test_fold, y_test_fold,
@@ -448,15 +477,20 @@ def main():
     # embeddingType = "BERT"
     embeddingType = "ConceptNet"
 
-    # modtype = "CNN"
-    modtype = "GRU"
+    modtype = "CNN"
+    # modtype = "GRU"
     # modtype = "LSTM"
+
+    maxLength = 512
 
     # knowledgeInfusion = True
     knowledgeInfusion = False
 
-    smote_bool = True
-    # smote_bool = False
+    # smote_bool = True
+    smote_bool = False
+
+    weight_bool = True
+    # weight_bool = False
 
     num_labels = 4
     emb_dim = "3d"
@@ -473,19 +507,28 @@ def main():
     else:                                        #Default Values
         param_grid = {"batch_size": 32,          #32
                       "dropout": 0.25,           #0.25 for RNN, 0.3 for CNN
-                      "epochs": 3,              #10
+                      "epochs": 10,              #10
                       "learning_rate":0.001,     #0.001
                       "rnn_nodes":128,           #128
                       "1st_dense":300,           #300
                       "2nd_dense":100}           #100
-    maxLength = 512
+
+    if smote_bool == True and weight_bool == True:
+        print("Both SMOTE and loss weighting set to True. For now, please only choose one. Closing...")
+        exit()
+    print("-----------------------------------")
     print(f"Embedding Type: {embeddingType}")
     print(f"Model Type: {modtype}")
+    print(f"Sentence Length: {maxLength}")
+    if smote_bool == True:
+        print("With SMOTE")
+    elif weight_bool == True:
+        print("With weighted loss")
     print(f"{'No' if knowledgeInfusion == False else 'with'} Knowledge Infusion")
     print(f"{'No' if parameter_tune == False else 'with'} Parameter Tuning")
     print("-----------------------------------")
     runModel(outputPath, filePath, modtype, knowledgeInfusion, embeddingType, maxLength, num_labels, emb_dim, split, cross_validation,
-             parameter_tune, smote_bool, param_grid, number_of_folds)
+             parameter_tune, smote_bool, weight_bool, param_grid, number_of_folds)
 
 global_max_evals = 30
 if platform.system() == "Windows":
