@@ -85,14 +85,15 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
     # Applying SMOTE to training set
     # Random seed set for now to make sure all pipelines overfit the same way
     if smoteBool == True:
-        valueCounts = pd.Series(y_train_fold.numpy()).value_counts()
+        valueCounts = pd.Series(y_train_fold).value_counts()
         print("Before:", valueCounts)
         # y_train_fold.value_counts()
         # over = SMOTE(sampling_strategy={0:valueCounts[0],
         #                                 1:valueCounts[0],
         #                                 2:math.ceil(valueCounts[0]*1.2),
         #                                 3:math.ceil(valueCounts[0]*1.2)},random_state=SMOTE_random_seed)
-        over = SMOTE(random_state=SMOTE_random_seed)
+        # over = SMOTE(random_state=SMOTE_random_seed)
+        over = RandomOverSampler(random_state=SMOTE_random_seed)
         steps = [('o', over)]
         pipeline = Pipeline(steps=steps)
         if emb_type == "BERT":
@@ -119,8 +120,6 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         X_train_emb_fold = getEmbeddings(train_input_ids, train_attention_masks, model, embed_dimen)
         X_test_emb_fold = getEmbeddings(test_input_ids, test_attention_masks, model, embed_dimen)
         number_channels, number_features = X_train_emb_fold.shape[1], X_train_emb_fold.shape[2]
-        # if modelType == "cascade":
-        #     train_tokens = X_train_fold
     elif emb_type == "ConceptNet":
         X_train_emb_fold = con_train_tokens
         X_test_emb_fold = con_test_tokens
@@ -172,7 +171,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         onehotTest = pd.get_dummies(pd.Series(y_test_fold.numpy()), drop_first=False)
         y_test_fold = convert_to_tensor(onehotTest)
     else:
-        onehot = pd.get_dummies(pd.Series(y_train_fold.numpy()), drop_first=False)
+        onehot = pd.get_dummies(pd.Series(y_train_fold), drop_first=False)
         y_train_fold = convert_to_tensor(onehot)
         onehotTest = pd.get_dummies(pd.Series(y_test_fold.numpy()), drop_first=False)
         y_test_fold = convert_to_tensor(onehotTest)
@@ -486,11 +485,11 @@ def main():
     # knowledgeInfusion = True
     knowledgeInfusion = False
 
-    # smote_bool = True
-    smote_bool = False
+    smote_bool = True
+    # smote_bool = False
 
-    weight_bool = True
-    # weight_bool = False
+    # weight_bool = True
+    weight_bool = False
 
     num_labels = 4
     emb_dim = "3d"
