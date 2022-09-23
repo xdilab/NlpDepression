@@ -88,11 +88,6 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         valueCounts = pd.Series(y_train_fold).value_counts()
         print("Before:", valueCounts)
         # y_train_fold.value_counts()
-        # over = SMOTE(sampling_strategy={0:valueCounts[0],
-        #                                 1:valueCounts[0],
-        #                                 2:math.ceil(valueCounts[0]*1.2),
-        #                                 3:math.ceil(valueCounts[0]*1.2)},random_state=SMOTE_random_seed)
-        # over = SMOTE(random_state=SMOTE_random_seed)
         over = RandomOverSampler(random_state=SMOTE_random_seed)
         steps = [('o', over)]
         pipeline = Pipeline(steps=steps)
@@ -177,7 +172,10 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         y_test_fold = convert_to_tensor(onehotTest)
 
 
-    checkpointName = f"{emb_type}_{modelType}_best_model.h5"
+    if know_infus_bool == True:
+        checkpointName = f"{emb_type}_{modelType}_with_KI_best_model.h5"
+    else:
+        checkpointName = f"{emb_type}_{modelType}_no_KI_best_model.h5"
 
     es = EarlyStopping(monitor='val_auc', mode="max", patience=10, min_delta=0)
     mc = ModelCheckpoint(checkpointName, monitor='val_auc', mode='max', verbose=0,
@@ -473,11 +471,11 @@ def main():
         filePath = r"/ddn/home12/r3102/files/500_Reddit_users_posts_labels.csv"
         outputPath = r"/ddn/home12/r3102/results"
 
-    # embeddingType = "BERT"
-    embeddingType = "ConceptNet"
+    embeddingType = "BERT"
+    # embeddingType = "ConceptNet"
 
-    modtype = "CNN"
-    # modtype = "GRU"
+    # modtype = "CNN"
+    modtype = "GRU"
     # modtype = "LSTM"
 
     maxLength = 512
@@ -485,11 +483,11 @@ def main():
     # knowledgeInfusion = True
     knowledgeInfusion = False
 
-    smote_bool = True
-    # smote_bool = False
+    # smote_bool = True
+    smote_bool = False
 
-    # weight_bool = True
-    weight_bool = False
+    weight_bool = True
+    # weight_bool = False
 
     num_labels = 4
     emb_dim = "3d"

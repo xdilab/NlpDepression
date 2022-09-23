@@ -213,50 +213,52 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
 
 
     if e_type == "BERT":
-        input_shape = Input(shape=(num_channels, num_features))
+        input_shape = Input(shape=(num_channels, num_features), name="BERT_Input")
         if modelType == "GRU":
-            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
+            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"BERT_bi-{modelType}")(input_shape)
         elif modelType == "LSTM":
-            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(input_shape)
+            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"BERT_bi-{modelType}")(input_shape)
     elif e_type == "ConceptNet":
-        input_shape = Input(shape=(max_length,))
+        input_shape = Input(shape=(max_length,), name="ConceptNet_Input")
         emb = Embedding(vocabSize[con_index], preTrainDim, embeddings_initializer=Constant(embedding_matrix[con_index]),
-                        input_length=max_length, trainable=False)(input_shape)
+                        input_length=max_length, trainable=False, name="ConceptNet_Embeddings")(input_shape)
 
         if modelType == "GRU":
-            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
+            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"ConceptNet_bi-{modelType}")(emb)
         elif modelType == "LSTM":
-            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(emb)
+            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"ConceptNet_bi-{modelType}")(emb)
 
-    embAtt = Attention(dropout=0.25)([embRNN, embRNN])
+    embAtt = Attention(dropout=0.25, name=f"{e_type}_Self_Attention")([embRNN, embRNN])
 
     if know_infus_bool == True:
-        isa_input = Input(shape=(max_length,))
-        aff_input = Input(shape=(max_length,))
+        isa_input = Input(shape=(max_length,), name="IsaCore_Input")
+        aff_input = Input(shape=(max_length,), name="AffectiveSpace_Input")
 
-        isa = Embedding(vocabSize[isa_index], 100, embeddings_initializer=Constant(embedding_matrix[isa_index]), input_length=max_length, trainable=False)(isa_input)
-        aff = Embedding(vocabSize[aff_index], 100, embeddings_initializer=Constant(embedding_matrix[aff_index]), input_length=max_length,trainable=False)(aff_input)
+        isa = Embedding(vocabSize[isa_index], 100, embeddings_initializer=Constant(embedding_matrix[isa_index]),
+                        input_length=max_length, trainable=False, name="IsaCore_Embeddings")(isa_input)
+        aff = Embedding(vocabSize[aff_index], 100, embeddings_initializer=Constant(embedding_matrix[aff_index]),
+                        input_length=max_length,trainable=False, name="AffectiveSpace_Embeddings")(aff_input)
 
         if modelType == "GRU":
-            isaRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
-            affRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
+            isaRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"IsaCore_bi-{modelType}")(isa)
+            affRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"AffectiveSpace_bi-{modelType}")(aff)
         elif modelType == "LSTM":
-            isaRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(isa)
-            affRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25))(aff)
+            isaRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"IsaCore_bi-{modelType}")(isa)
+            affRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"AffectiveSpace_bi-{modelType}")(aff)
 
-        isaAtt = Attention(dropout=0.25)([isaRNN, isaRNN])
-        affAtt = Attention(dropout=0.25)([affRNN, affRNN])
+        isaAtt = Attention(dropout=0.25, name="IsaCore_Self_Attention")([isaRNN, isaRNN])
+        affAtt = Attention(dropout=0.25, name="AffectiveSpace_Self_Attention")([affRNN, affRNN])
 
-        merged = Concatenate(axis=-1)([embAtt, isaAtt, affAtt])
-        flattened = Flatten()(merged)
+        merged = Concatenate(axis=-1, name="Concatenation")([embAtt, isaAtt, affAtt])
+        flattened = Flatten(name="Flattening")(merged)
     else:
-        flattened = Flatten()(embAtt)
+        flattened = Flatten(name="Flattening")(embAtt)
 
-    dense1 = Dense(param_grid["1st_dense"], activation='relu', kernel_initializer='he_uniform')(flattened)
-    drop1 = Dropout(param_grid["dropout"])(dense1)
-    dense2 = Dense(param_grid["2nd_dense"], activation='relu', kernel_initializer='he_uniform')(drop1)
-    drop2 = Dropout(param_grid["dropout"])(dense2)
-    out = Dense(num_label, activation='softmax')(drop2)
+    dense1 = Dense(param_grid["1st_dense"], activation='relu', kernel_initializer='he_uniform', name="1st-fully-connected")(flattened)
+    drop1 = Dropout(param_grid["dropout"], name="1st-dropout")(dense1)
+    dense2 = Dense(param_grid["2nd_dense"], activation='relu', kernel_initializer='he_uniform', name="2nd-fully-connected")(drop1)
+    drop2 = Dropout(param_grid["dropout"], name="2nd-dropout")(dense2)
+    out = Dense(num_label, activation='softmax', name="Output")(drop2)
 
     if know_infus_bool == True:
         nMod = Model([input_shape, isa_input, aff_input], out)
