@@ -9,6 +9,32 @@ def getXfromBestModelfromTrials(trials, x):
     best_trial_obj = valid_trial_list[index_having_minumum_loss]
     return best_trial_obj['result'][x]
 
+def BERT_embeddings(preprocessor, encoder, seq_length, outputType):
+    if seq_length > 512:
+        seq_length = 512
+        print("BERT model only allows a maximum of 512 tokens. Truncating to 512...")
+
+    # Step 1: tokenize batches of text inputs.
+    text_inputs = [tf.keras.layers.Input(shape=(), dtype=tf.string)] # This SavedModel accepts up to 2 text inputs.
+    tokenize = hub.KerasLayer(preprocessor.tokenize)
+
+    tokenized_inputs = [tokenize(segment) for segment in text_inputs]
+
+    # Step 2 (optional): modify tokenized inputs.
+    pass
+
+    # Step 3: pack input sequences for the Transformer encoder.
+    bert_pack_inputs = hub.KerasLayer(
+        preprocessor.bert_pack_inputs,
+        arguments=dict(seq_length=seq_length))  # Optional argument.
+    encoder_inputs = bert_pack_inputs(tokenized_inputs)
+    outputs = encoder(encoder_inputs)
+
+    if outputType == "pooled":
+        return tf.keras.Model(text_inputs, outputs["pooled_output"])
+    elif outputType == "sequence":
+        return tf.keras.Model(text_inputs, outputs["sequence_output"])
+
 def bert_encode(data, tokenizer, maximum_length):
     encoded = data.apply(lambda x: tokenizer.encode_plus(x, add_special_tokens=True, truncation=True,
                                                            max_length=maximum_length,padding="max_length",

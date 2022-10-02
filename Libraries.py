@@ -20,6 +20,9 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import transformers as ppb
 import tensorflow as tf
+import tensorflow_hub as hub
+import tensorflow_text as text
+
 from imblearn.over_sampling import SMOTE, RandomOverSampler
 from imblearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split, StratifiedKFold

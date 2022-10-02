@@ -2,7 +2,7 @@
 
 from Libraries import *
 from modelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, RNNModel, objectiveFunctionRNN
-from HelperFunctions import getEmbeddings,bert_encode, getTokens, getLabels, extractList, \
+from HelperFunctions import getEmbeddings,bert_encode, getTokens, getLabels, extractList, BERT_embeddings,\
     getXfromBestModelfromTrials, getStatistics, printPredictions, printOverallResults, onehotEncode, getSummStats
 
 def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length, num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
@@ -10,8 +10,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
             isacore_Embeddings = {}, affectiveSpace_Embeddings = {}):
 
     if emb_type == "BERT":
-        tokenizer = embToken[0]
-        model = embToken[1]
+        BERT_Model = embToken
     elif emb_type == "ConceptNet":
         concept_Embeddings = embToken
 
@@ -32,11 +31,11 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                                                       outputLength=max_length, vocab=aff, num_ngrams=3,
                                                       Xtrain=X_train_fold, Xtest=X_test_fold)
 
-    if emb_type == "BERT":
-        train_input_ids, train_attention_masks = bert_encode(X_train_fold, tokenizer, max_length)
-        test_input_ids, test_attention_masks = bert_encode(X_test_fold, tokenizer, max_length)
+    # if emb_type == "BERT":
+    #     train_input_ids, train_attention_masks = bert_encode(X_train_fold, tokenizer, max_length)
+    #     test_input_ids, test_attention_masks = bert_encode(X_test_fold, tokenizer, max_length)
 
-    elif emb_type == "ConceptNet":
+    if emb_type == "ConceptNet":
         con = [x for x in concept_Embeddings.keys() if x != ""]
         con_vocab_size, con_word_index, \
         con_train_tokens, con_test_tokens = getTokens(standardization="lower_and_strip_punctuation",
@@ -108,14 +107,18 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                 isa_train_tokens, _ = pipeline.fit_resample(isa_train_tokens, y_train_fold)
                 aff_train_tokens, y_train_fold = pipeline.fit_resample(aff_train_tokens, y_train_fold)
             print("After:", pd.Series(y_train_fold).value_counts())
+
     # Convert to BERT embeddings for BERT models
-    # Rename tokens for ConceptNet models for simplicity of coding
     if emb_type == "BERT":
         # text, tokenizer, model, 2d or 3d embeddings
-        X_train_emb_fold = getEmbeddings(train_input_ids, train_attention_masks, model, embed_dimen)
-        X_test_emb_fold = getEmbeddings(test_input_ids, test_attention_masks, model, embed_dimen)
+        X_train_emb_fold = BERT_Model(X_train_fold)
+        X_test_emb_fold = BERT_Model(X_test_fold)
+
+        # X_train_emb_fold = getEmbeddings(train_input_ids, train_attention_masks, model, embed_dimen)
+        # X_test_emb_fold = getEmbeddings(test_input_ids, test_attention_masks, model, embed_dimen)
         number_channels, number_features = X_train_emb_fold.shape[1], X_train_emb_fold.shape[2]
     elif emb_type == "ConceptNet":
+        # Rename tokens for ConceptNet models for simplicity of coding
         X_train_emb_fold = con_train_tokens
         X_test_emb_fold = con_test_tokens
         number_channels, number_features = 512, 768
@@ -274,10 +277,21 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
         new_df = pd.DataFrame({"Post": text, "Label": labels}, columns=['Post', 'Label'])
 
     if emb_type == "BERT":
+        if embed_dimen.lower() == "3d":
+            outputType = "sequence"
+        elif embed_dimen.lower() == "2d":
+            outputType = "pooled"
+        else:
+            print("Incorrect embedding dimension given. Exiting...")
+            exit()
+
         #Import bert model
-        model_class, tokenizer_class, pretrained_weights = (ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
-        tokenizer = tokenizer_class.from_pretrained(pretrained_weights)
-        model = model_class.from_pretrained(pretrained_weights)
+        preprocess = hub.load(preprocessor_link)
+        encoder = hub.KerasLayer(encoder_link, trainable=True)
+        BERT_Model = BERT_embeddings(preprocess, encoder, max_length, outputType)
+        # model_class, tokenizer_class, pretrained_weights = (ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
+        # tokenizer = tokenizer_class.from_pretrained(pretrained_weights)
+        # model = model_class.from_pretrained(pretrained_weights)
     elif emb_type == "ConceptNet":
         concept_Embeddings = dict()
         f = open(numberbatch_path, encoding="utf8")
@@ -318,7 +332,7 @@ def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_le
     new_df = new_df.sample(frac=1, random_state=KFold_shuffle_random_seed)
 
     if emb_type == "BERT":
-        embToken = [tokenizer, model]
+        embToken = BERT_Model
     elif emb_type == "ConceptNet":
         embToken = concept_Embeddings
 
@@ -502,9 +516,9 @@ def main():
                       "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001]),
                       "rnn_nodes": hp.choice("rnn_nodes", [128, 256])}
     else:                                        #Default Values
-        param_grid = {"batch_size": 32,          #32
+        param_grid = {"batch_size": 32,          #32, 4 for original CNN
                       "dropout": 0.25,           #0.25 for RNN, 0.3 for CNN
-                      "epochs": 10,              #10
+                      "epochs": 10,              #10, 50 for original CNN
                       "learning_rate":0.001,     #0.001
                       "rnn_nodes":128,           #128
                       "1st_dense":300,           #300
@@ -527,6 +541,10 @@ def main():
     runModel(outputPath, filePath, modtype, knowledgeInfusion, embeddingType, maxLength, num_labels, emb_dim, split, cross_validation,
              parameter_tune, smote_bool, weight_bool, param_grid, number_of_folds)
 
+
+preprocessor_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_preprocess/3"
+encoder_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/4"
+
 global_max_evals = 30
 if platform.system() == "Windows":
     numberbatch_path = r"D:\Summer 2022 Project\numberbatch-en.txt"
@@ -540,4 +558,5 @@ elif platform.system() == "Linux":
 # glove_100d_path = r"D:\Summer 2022 Project\glove.6B.100d.txt"
 preTrainDim = 300
 seed = 99
+newOutputFolder = r"C:\Users\dmlee\Desktop\Summer_Project\Summer 2022\Output\CSSRS\temp"
 main()
