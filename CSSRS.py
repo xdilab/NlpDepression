@@ -547,10 +547,16 @@ encoder_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/4"
 
 global_max_evals = 30
 if platform.system() == "Windows":
+    preprocessor_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_preprocess/3"
+    encoder_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/4"
+
     numberbatch_path = r"D:\Summer 2022 Project\numberbatch-en.txt"
     isacore_path = r"D:\Summer 2022 Project\isacore\isacore.csv"
     affectiveSpace_path = r"D:\Summer 2022 Project\affectivespace\affectivespace.csv"
 elif platform.system() == "Linux":
+    preprocessor_link = r"/ddn/home12/r3102/files/bert_en_uncased_preprocess_3"
+    encoder_link = r"/ddn/home12/r3102/files/bert_en_uncased_L-12_H-768_A-12_4"
+
     numberbatch_path = r"/ddn/home12/r3102/files/numberbatch-en.txt"
     isacore_path = r"/ddn/home12/r3102/files/isacore.csv"
     affectiveSpace_path = r"/ddn/home12/r3102/files/affectivespace.csv"
