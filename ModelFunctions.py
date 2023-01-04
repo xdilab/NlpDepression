@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 
 from Libraries import *
-from HelperFunctions import getTokens, getEmbeddings, multiclass_ROC_AUC
+from StatisticsFunctions import multiclass_ROC_AUC
+from EmbeddingFunctions import getTokens
 # Fully Dense Neural Network
 
 # Fully Dense Neural Network
@@ -44,10 +45,10 @@ def objectiveFunctionCNN(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels,
     return loss
 
 
-def objectiveFunctionRNN(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, n_lab, modelType, e_type, emb_dim,
+def objectiveFunctionRNN(param_grid, Xtrain, ytrain, Xtest, ytest, num_channels, num_features, n_lab, model_name, modelType, e_type, emb_dim,
                          know_infus_bool, es, mc, preTrainDim = 300, max_length = 512, vocabSize = [], embedding_matrix = []):
 
-    model = RNNModel(param_grid, num_channels, num_features, n_lab, e_type, modelType, know_infus_bool, emb_dim, preTrainDim, max_length, vocabSize, embedding_matrix)
+    model = RNNModel(param_grid, num_channels, num_features, n_lab, e_type, model_name, modelType, know_infus_bool, emb_dim, preTrainDim, max_length, vocabSize, embedding_matrix)
     model.fit(Xtrain, ytrain, validation_data=(Xtrain, ytrain), epochs=param_grid["epochs"], batch_size=param_grid["batch_size"], callbacks=[es, mc], verbose=0)
     loss, accuracy, auc_values = model.evaluate(Xtest, ytest, verbose=2)
     return loss
@@ -195,7 +196,88 @@ def cnnModel2(num_channels, num_features, num_labels, e_type):
     cnn.summary()
     return cnn
 
-def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelType, know_infus_bool, emb_dim, preTrainDim = 300,
+def RNNModel(param_grid, num_channels, num_features, num_label, e_type, model_name, modelType, know_infus_bool, emb_dim, preTrainDim = 300,
+                 max_length = 512, vocabSize = [], embedding_matrix =[]):
+
+    metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
+    if num_label == 2:
+        loss = 'binary_crossentropy'
+    else:
+        loss = 'categorical_crossentropy'
+
+    if e_type == "BERT" and know_infus_bool == True:
+        isa_index, aff_index = 0, 1
+    elif e_type == "ConceptNet" and know_infus_bool == True:
+        con_index, isa_index, aff_index = 0, 1, 2
+    elif e_type == "ConceptNet" and know_infus_bool == False:
+        con_index = 0
+
+
+    if e_type == "BERT":
+        input_shape = Input(shape=(num_channels, num_features), name=f"{model_name}_Input")
+        if modelType == "GRU":
+            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0, recurrent_dropout=0), name=f"{model_name}_bi-{modelType}")(input_shape)
+        elif modelType == "LSTM":
+            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25,
+                                        kernel_initializer=tf.keras.initializers.glorot_uniform(seed=seed),
+                                       recurrent_initializer=tf.keras.initializers.Orthogonal(gain=1.0, seed=seed)), name=f"{model_name}_bi-{modelType}")(input_shape)
+
+    embAtt = Attention(dropout=0.25, name=f"{model_name}_Self_Attention")([embRNN, embRNN])
+
+    if know_infus_bool == True:
+        isa_input = Input(shape=(max_length,), name="IsaCore_Input")
+        aff_input = Input(shape=(max_length,), name="AffectiveSpace_Input")
+
+        isa = Embedding(vocabSize[isa_index], 100, embeddings_initializer=Constant(embedding_matrix[isa_index]),
+                        input_length=max_length, trainable=False, name="IsaCore_Embeddings")(isa_input)
+        aff = Embedding(vocabSize[aff_index], 100, embeddings_initializer=Constant(embedding_matrix[aff_index]),
+                        input_length=max_length,trainable=False, name="AffectiveSpace_Embeddings")(aff_input)
+
+        if modelType == "GRU":
+            isaRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"IsaCore_bi-{modelType}")(isa)
+            affRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"AffectiveSpace_bi-{modelType}")(aff)
+        elif modelType == "LSTM":
+            isaRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"IsaCore_bi-{modelType}")(isa)
+            affRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"AffectiveSpace_bi-{modelType}")(aff)
+
+        isaAtt = Attention(dropout=0.25, name="IsaCore_Self_Attention")([isaRNN, isaRNN])
+        affAtt = Attention(dropout=0.25, name="AffectiveSpace_Self_Attention")([affRNN, affRNN])
+
+        merged = Concatenate(axis=-1, name="Concatenation")([embAtt, isaAtt, affAtt])
+        flattened = Flatten(name="Flattening")(merged)
+    else:
+        flattened = Flatten(name="Flattening")(embAtt)
+
+    # dense1 = Dense(param_grid["1st_dense"], activation='relu', kernel_initializer=tf.keras.initializers.HeUniform(seed=seed),
+    #                name="1st-fully-connected")(flattened)
+    # drop1 = Dropout(param_grid["dropout"], name="1st-dropout", seed=seed)(dense1)
+    # dense2 = Dense(param_grid["2nd_dense"], activation='relu', kernel_initializer=tf.keras.initializers.HeUniform(seed=seed),
+    #                name="2nd-fully-connected")(drop1)
+    # drop2 = Dropout(param_grid["dropout"], name="2nd-dropout", seed=seed)(dense2)
+    # out = Dense(num_label, activation='softmax', name="Output")(drop2)
+
+    dense1 = Dense(param_grid["1st_dense"], activation='relu',name="1st-fully-connected")(flattened)
+    drop1 = Dropout(param_grid["dropout"], name="1st-dropout")(dense1)
+    dense2 = Dense(param_grid["2nd_dense"], activation='relu',name="2nd-fully-connected")(drop1)
+    drop2 = Dropout(param_grid["dropout"], name="2nd-dropout")(dense2)
+    out = Dense(num_label, activation='softmax', name="Output")(drop2)
+
+    if know_infus_bool == True:
+        nMod = Model([input_shape, isa_input, aff_input], out)
+    else:
+        nMod = Model(input_shape, out)
+
+    nMod.compile(optimizer=Adam(learning_rate=param_grid["learning_rate"]),
+                   loss=loss,
+                   metrics=metrics)
+
+    nMod.summary()
+    if platform.system() != "Linux":
+        dot_img_file = f'Cascade_{e_type}.png'
+        tf.keras.utils.plot_model(nMod, to_file=dot_img_file, show_shapes=False, show_layer_names=False)
+    return nMod
+
+def RNNModel2(param_grid, num_channels, num_features, num_label, e_type, modelType, know_infus_bool, emb_dim, preTrainDim = 300,
                  max_length = 512, vocabSize = [], embedding_matrix =[]):
 
     metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
@@ -215,18 +297,36 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
     if e_type == "BERT":
         input_shape = Input(shape=(num_channels, num_features), name="BERT_Input")
         if modelType == "GRU":
-            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"BERT_bi-{modelType}")(input_shape)
+            # embRNN = GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25,
+            #                            kernel_initializer=tf.keras.initializers.glorot_uniform(seed=seed),
+            #                            recurrent_initializer=tf.keras.initializers.Orthogonal(gain=1.0, seed=seed), name=f"BERT_{modelType}")(input_shape)
+
+            # embRNN = GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0, recurrent_dropout=0,
+            #              kernel_initializer=tf.keras.initializers.glorot_uniform(seed=seed),
+            #              recurrent_initializer=tf.keras.initializers.Orthogonal(gain=1.0, seed=seed),
+            #              name=f"BERT_{modelType}")(input_shape)
+
+            embRNN = GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25,name=f"BERT_{modelType}")(input_shape)
+
+            # embRNN = GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0, recurrent_dropout=0,name=f"BERT_{modelType}")(input_shape)
+
         elif modelType == "LSTM":
-            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"BERT_bi-{modelType}")(input_shape)
+            embRNN = LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25,
+                                        kernel_initializer=tf.keras.initializers.glorot_uniform(seed=seed),
+                                       recurrent_initializer=tf.keras.initializers.Orthogonal(gain=1.0, seed=seed), name=f"BERT_{modelType}")(input_shape)
     elif e_type == "ConceptNet":
         input_shape = Input(shape=(max_length,), name="ConceptNet_Input")
         emb = Embedding(vocabSize[con_index], preTrainDim, embeddings_initializer=Constant(embedding_matrix[con_index]),
                         input_length=max_length, trainable=False, name="ConceptNet_Embeddings")(input_shape)
 
         if modelType == "GRU":
-            embRNN = Bidirectional(GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"ConceptNet_bi-{modelType}")(emb)
+            embRNN = GRU(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25,
+                                        kernel_initializer=tf.keras.initializers.glorot_uniform(seed=seed),
+                                       recurrent_initializer=tf.keras.initializers.Orthogonal(gain=1.0, seed=seed), name=f"ConceptNet_{modelType}")(emb)
         elif modelType == "LSTM":
-            embRNN = Bidirectional(LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25), name=f"ConceptNet_bi-{modelType}")(emb)
+            embRNN = LSTM(param_grid["rnn_nodes"], return_sequences=True, dropout=0.25, recurrent_dropout=0.25,
+                                        kernel_initializer=tf.keras.initializers.glorot_uniform(seed=seed),
+                                       recurrent_initializer=tf.keras.initializers.Orthogonal(gain=1.0, seed=seed), name=f"ConceptNet_{modelType}")(emb)
 
     embAtt = Attention(dropout=0.25, name=f"{e_type}_Self_Attention")([embRNN, embRNN])
 
@@ -254,10 +354,18 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
     else:
         flattened = Flatten(name="Flattening")(embAtt)
 
-    dense1 = Dense(param_grid["1st_dense"], activation='relu', kernel_initializer='he_uniform', name="1st-fully-connected")(flattened)
+    # dense1 = Dense(param_grid["1st_dense"], activation='relu', kernel_initializer=tf.keras.initializers.HeUniform(seed=seed),
+    #                name="1st-fully-connected")(flattened)
+    # drop1 = Dropout(param_grid["dropout"], name="1st-dropout", seed=seed)(dense1)
+    # dense2 = Dense(param_grid["2nd_dense"], activation='relu', kernel_initializer=tf.keras.initializers.HeUniform(seed=seed),
+    #                name="2nd-fully-connected")(drop1)
+    # drop2 = Dropout(param_grid["dropout"], name="2nd-dropout", seed=seed)(dense2)
+
+    dense1 = Dense(param_grid["1st_dense"], activation='relu',name="1st-fully-connected")(flattened)
     drop1 = Dropout(param_grid["dropout"], name="1st-dropout")(dense1)
-    dense2 = Dense(param_grid["2nd_dense"], activation='relu', kernel_initializer='he_uniform', name="2nd-fully-connected")(drop1)
+    dense2 = Dense(param_grid["2nd_dense"], activation='relu',name="2nd-fully-connected")(drop1)
     drop2 = Dropout(param_grid["dropout"], name="2nd-dropout")(dense2)
+
     out = Dense(num_label, activation='softmax', name="Output")(drop2)
 
     if know_infus_bool == True:
@@ -274,4 +382,3 @@ def RNNModel(param_grid, num_channels, num_features, num_label, e_type, modelTyp
         dot_img_file = f'Cascade_{e_type}.png'
         tf.keras.utils.plot_model(nMod, to_file=dot_img_file, show_shapes=False, show_layer_names=False)
     return nMod
-
