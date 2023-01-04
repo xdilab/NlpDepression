@@ -1,18 +1,266 @@
 #!/usr/bin/env python3
 
 from Libraries import *
-from modelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, RNNModel, objectiveFunctionRNN
-from HelperFunctions import getEmbeddings,bert_encode, getTokens, getLabels, extractList, BERT_embeddings,\
-    getXfromBestModelfromTrials, getStatistics, printPredictions, printOverallResults, onehotEncode, getSummStats
+from ModelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, RNNModel, objectiveFunctionRNN
+from HelperFunctions import getLabels, extractList,getXfromBestModelfromTrials, printPredictions, \
+    printOverallResults, onehotEncode
+from EmbeddingFunctions import BERT_embeddings, getTokens
+from StatisticsFunctions import getStatistics, getSummStats
+
+
+def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length, num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
+             smoteBool, weightBool, hyperparameters, number_of_folds):
+
+    if tf.test.gpu_device_name():
+        print('GPU: {}'.format(tf.test.gpu_device_name()))
+    else:
+        print('CPU version')
+    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+
+    startTime = datetime.now()
+    CSSRS = pd.read_csv(filespath)
+    # getSummStats(CSSRS)
+
+    # Get copy of original dataset and append embeddings #W
+    df = CSSRS.copy(deep=True)
+    if num_labels == 4 or num_labels == 5:
+        df, inv_map = getLabels(df, num_labels)
+    elif num_labels == 2:
+        df = df.sample(frac=0.5, random_state=shuffle_rnd_state)
+
+    # Extract List from string then join back together (fixes string)
+    extractList(df)
+    df["Post"] = df["Post"].apply(lambda x: " ".join(x))
+    # text = df["Post"].apply(lambda x: x.strip('][').replace("\', '", " ").lower())
+    text = df["Post"].apply(lambda x: x.lower())
+    labels = df["Label"]
+
+    # If spittling entire dataset into train-test split
+    if split_Bool == True:
+        test_size = 0.25
+        X_train, X_test, y_train, y_test = train_test_split(text, labels, test_size = test_size, shuffle = True, stratify=labels, random_state=split_random_seed)
+        new_df = pd.DataFrame({"Post": list(X_train), "Label": y_train}, columns=['Post', 'Label'])
+    else:
+        new_df = pd.DataFrame({"Post": text, "Label": labels}, columns=['Post', 'Label'])
+
+    # Generating BERT embedding model
+    if emb_type == "BERT":
+        if embed_dimen.lower() == "3d":
+            outputType = "sequence"
+        elif embed_dimen.lower() == "2d":
+            outputType = "pooled"
+        else:
+            print("Incorrect embedding dimension given. Exiting...")
+            exit()
+
+        #Import bert model
+        preprocess = hub.load(preprocessor_link)
+        encoder = hub.KerasLayer(encoder_link, trainable=True)
+        BERT_Model = BERT_embeddings(preprocess, encoder, max_length, outputType)
+        # model_class, tokenizer_class, pretrained_weights = (ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
+        # tokenizer = tokenizer_class.from_pretrained(pretrained_weights)
+        # model = model_class.from_pretrained(pretrained_weights)
+
+    # Generating ConceptNet embedding matrix
+    elif emb_type == "ConceptNet":
+        concept_Embeddings = dict()
+        f = open(numberbatch_path, encoding="utf8")
+        for line in f:
+            values = line.split()
+            word = str(values[0])
+            coefs = np.asarray(values[1:], dtype='float32')
+            concept_Embeddings[word] = coefs
+        f.close()
+        concept_Embeddings = {k.replace("_", " "): v for k, v in concept_Embeddings.items()}
+        concept_Embeddings = {k.translate(str.maketrans('', '', string.punctuation)).strip(): v for k, v in
+                              concept_Embeddings.items()}
+
+    # Generating Knowledge Infusion embedding matrices
+    if know_infus_bool == True:
+        df = pd.read_csv(isacore_path, header=None, index_col=0)
+        df = df.drop(index="#NAME?")
+        isacore_Embeddings = dict()
+        for index, row in df.iterrows():
+            isacore_Embeddings[str(index)] = row.to_numpy()
+        isacore_Embeddings = {k.translate(str.maketrans('', '', string.punctuation)): v for k, v in
+                              isacore_Embeddings.items()}
+
+        df = pd.read_csv(affectiveSpace_path, header=None)
+        df[0] = df[0].str.replace("_", " ")
+        df.set_index(0, inplace=True)
+        affectiveSpace_Embeddings = dict()
+        for index, row in df.iterrows():
+            affectiveSpace_Embeddings[str(index)] = row.to_numpy()
+
+    # Shuffle dataset
+    new_df = new_df.sample(frac=1, random_state=KFold_shuffle_random_seed)
+
+    # Create alias for principal embedding
+    if emb_type == "BERT":
+        embToken = BERT_Model
+    elif emb_type == "ConceptNet":
+        embToken = concept_Embeddings
+
+    # If doing Cross-Fold validation
+    if CV_Bool == True:
+        # Define per-fold score containers
+        acc_per_fold = []
+        loss_per_fold = []
+        fold_stats = []
+        fold_matrix = []
+        fold_hyper = []
+        test_size_per_fold = []
+
+        whole_results = pd.DataFrame({"Actual":pd.Series(dtype=int), "Predicted":pd.Series(dtype=int),
+                                      "PredictedProba":pd.Series(dtype=int), "Fold":pd.Series(dtype=int)})
+        fold_results = []
+        sfk = StratifiedKFold(n_splits=number_of_folds, shuffle=False)
+        fold_num = 1
+        for train_indx, test_indx in sfk.split(new_df["Post"], new_df["Label"]):
+
+            fold_train = new_df.iloc[train_indx].copy()
+            X_train_fold = fold_train["Post"]
+            y_train_fold = fold_train["Label"]
+
+            fold_test = new_df.iloc[test_indx].copy()
+            X_test_fold = fold_test["Post"]
+            y_test_fold = fold_test["Label"]
+
+            y_train_fold = tf.convert_to_tensor(y_train_fold)
+            y_test_fold = tf.convert_to_tensor(y_test_fold)
+            # Generate a print
+            print('------------------------------------------------------------------------')
+            print(f'Training for fold {fold_num} ...')
+
+
+            if know_infus_bool == True:
+                nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType,
+                                                                                  know_infus_bool, emb_type, max_length,
+                                                                                  num_labels, embed_dimen,split_Bool,
+                                                                                  CV_Bool, param_tune, smoteBool, weightBool,
+                                                                                  hyperparameters, number_of_folds, fold_num,
+                                                                                  X_train_fold, y_train_fold, X_test_fold, y_test_fold,
+                                                                                  embToken, isacore_Embeddings, affectiveSpace_Embeddings)
+            else:
+                nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType,
+                                                                                  know_infus_bool, emb_type, max_length,
+                                                                                  num_labels, embed_dimen, split_Bool,
+                                                                                  CV_Bool, param_tune, smoteBool, weightBool,
+                                                                                  hyperparameters, number_of_folds, fold_num,
+                                                                                  X_train_fold, y_train_fold, X_test_fold, y_test_fold,
+                                                                                  embToken)
+
+
+            train_auc = history.history['auc']
+            val_auc = history.history['val_auc']
+            train_acc = history.history['accuracy']
+            val_acc = history.history['val_accuracy']
+            train_loss = history.history['loss']
+            val_loss = history.history['val_loss']
+            epochs = range(len(train_auc))
+
+
+            fold_results.append({"train_auc":train_auc, "val_auc":val_auc, "train_acc":train_acc, "val_acc":val_acc,
+                            "train_loss":train_loss, "val_loss":val_loss, "epochs":epochs})
+
+            # Generate generalization metrics
+            print(f'Score for fold {fold_num}: {nnModel.metrics_names[0]} of {scores[0]}; {nnModel.metrics_names[1]} of {scores[1] * 100}%')
+            acc_per_fold.append(scores[1] * 100)
+            loss_per_fold.append(scores[0])
+            fold_hyper.append(hyperparameters)
+
+            y_pred = np.argmax(y_pred_proba,axis=1)
+            whole_results = pd.concat([whole_results, pd.DataFrame({"Actual":y_test_fold.numpy().tolist(), "Predicted":y_pred.tolist(),
+                                                                    "PredictedProba":y_pred_proba.tolist(), "Fold":fold_num})], ignore_index=True)
+
+            print(classification_report(y_test_fold, y_pred))
+
+            #contains precision, recall, and f1 score for each class
+            report = classification_report(y_test_fold, y_pred, output_dict=True)
+
+            #Get only precision, recall, f1-score, and support statistics
+            # filtered_report = {str(label): report[str(label)] for label in range(num_labels)}
+
+            matrix = confusion_matrix(y_test_fold, y_pred)
+            print(f"{num_labels}-label confusion matrix")
+            print(matrix)
+            #Increase Fold Number
+            fold_num = fold_num + 1
+
+            tf.keras.backend.clear_session()
+            tf.random.set_seed(seed)
+        # == Provide average scores ==
+        print('------------------------------------------------------------------------')
+        print('Score per fold')
+        for i in range(0, len(acc_per_fold)):
+            print('------------------------------------------------------------------------')
+            print(f'> Fold {i + 1} - Loss: {loss_per_fold[i]} - Accuracy: {acc_per_fold[i]}%')
+        print('------------------------------------------------------------------------')
+        print('Average scores for all folds:')
+        print(f'> Accuracy: {np.mean(acc_per_fold)} (+- {np.std(acc_per_fold)})')
+        print(f'> Loss: {np.mean(loss_per_fold)}')
+        print('------------------------------------------------------------------------')
+
+        overallResults = getStatistics(outputPath, whole_results["Actual"], whole_results["PredictedProba"], whole_results["Predicted"], num_labels)
+        # whole_results.to_csv(os.path.join(outputPath, "Actual_vs_Predicted.csv"), index=False)
+        endTime = datetime.now()
+        elapsedTime = endTime - startTime
+
+        printOverallResults(outputPath, f"New OverallResults {num_labels}Label.csv", num_labels,emb_type,max_length, smoteBool, split_Bool,
+                            number_of_folds, modelType, know_infus_bool, param_tune, overallResults, fold_hyper, elapsedTime, whole_results, fold_results)
+
+    # No CV Folds
+    else:
+        y_train = tf.convert_to_tensor(y_train)
+        y_test = tf.convert_to_tensor(y_test)
+
+        if know_infus_bool == True:
+            nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType,
+                                                                              know_infus_bool, emb_type,
+                                                                              max_length, num_labels, embed_dimen,
+                                                                              split_Bool, CV_Bool,
+                                                                              param_tune, smoteBool, weightBool,
+                                                                              hyperparameters, number_of_folds,
+                                                                              1, X_train, y_train, X_test, y_test,
+                                                                              embToken,
+                                                                              isacore_Embeddings,
+                                                                              affectiveSpace_Embeddings)
+        else:
+            nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType,
+                                                                              know_infus_bool, emb_type,
+                                                                              max_length, num_labels, embed_dimen,
+                                                                              split_Bool, CV_Bool, param_tune,
+                                                                              smoteBool,
+                                                                              weightBool, hyperparameters,
+                                                                              number_of_folds,
+                                                                              1, X_train, y_train, X_test, y_test,
+                                                                              embToken)
+        y_pred = np.argmax(y_pred_proba, axis=1)
+
+        whole_results = pd.DataFrame({"Actual": y_test.numpy().tolist(), "Predicted": y_pred.tolist(),
+                                          "PredictedProba": y_pred_proba.tolist()})
+
+        overallResults = getStatistics(outputPath, whole_results["Actual"], whole_results["PredictedProba"],
+                                       whole_results["Predicted"], num_labels)
+        fold_results = []
+        # printPredictions(y_test, y_pred, num_labels, outputPath)
+        endTime = datetime.now()
+        elapsedTime = endTime - startTime
+
+        printOverallResults(outputPath, f"OverallResults {num_labels}Label (no CV).csv", num_labels, emb_type, max_length, smoteBool,
+                            split_Bool, number_of_folds, modelType, know_infus_bool, param_tune, overallResults, hyperparameters,
+                            elapsedTime, whole_results, fold_results)
 
 def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length, num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
             smoteBool, weightBool, hyperparameters, number_of_folds, fold_num, X_train_fold, y_train_fold, X_test_fold, y_test_fold, embToken,
             isacore_Embeddings = {}, affectiveSpace_Embeddings = {}):
 
+    # Re-alias principal embeddings for easier differentiation
     if emb_type == "BERT":
         BERT_Model = embToken
     elif emb_type == "ConceptNet":
         concept_Embeddings = embToken
+
 
     if know_infus_bool == True:
         isa = [x for x in isacore_Embeddings.keys() if x != ""]
@@ -31,9 +279,6 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
                                                       outputLength=max_length, vocab=aff, num_ngrams=3,
                                                       Xtrain=X_train_fold, Xtest=X_test_fold)
 
-    # if emb_type == "BERT":
-    #     train_input_ids, train_attention_masks = bert_encode(X_train_fold, tokenizer, max_length)
-    #     test_input_ids, test_attention_masks = bert_encode(X_test_fold, tokenizer, max_length)
 
     if emb_type == "ConceptNet":
         con = [x for x in concept_Embeddings.keys() if x != ""]
@@ -81,7 +326,7 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         print(f"Total Vocab Size of isaCore is {isa_vocab_size}")
         print(f"Total Vocab Size of affectiveSpace is {aff_vocab_size}")
 
-    # Applying SMOTE to training set
+    # Applying RandomOverSampler to training set
     # Random seed set for now to make sure all pipelines overfit the same way
     if smoteBool == True:
         valueCounts = pd.Series(y_train_fold).value_counts()
@@ -113,9 +358,6 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
         # text, tokenizer, model, 2d or 3d embeddings
         X_train_emb_fold = BERT_Model(X_train_fold)
         X_test_emb_fold = BERT_Model(X_test_fold)
-
-        # X_train_emb_fold = getEmbeddings(train_input_ids, train_attention_masks, model, embed_dimen)
-        # X_test_emb_fold = getEmbeddings(test_input_ids, test_attention_masks, model, embed_dimen)
         number_channels, number_features = X_train_emb_fold.shape[1], X_train_emb_fold.shape[2]
     elif emb_type == "ConceptNet":
         # Rename tokens for ConceptNet models for simplicity of coding
@@ -241,241 +483,6 @@ def runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_len
 
     return nnModel, history, scores, y_pred_proba, hyperparameters
 
-def runModel(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length, num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
-             smoteBool, weightBool, hyperparameters, number_of_folds):
-
-    if tf.test.gpu_device_name():
-        print('GPU: {}'.format(tf.test.gpu_device_name()))
-    else:
-        print('CPU version')
-    print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
-
-    startTime = datetime.now()
-    CSSRS = pd.read_csv(filespath)
-    # getSummStats(CSSRS)
-    # CSSRS.rename(columns={"selftext":"Post", "is_suicide":"Label"}, inplace=True)
-
-    # Get copy of original dataset and append embeddings #W
-    df = CSSRS.copy(deep=True)
-    if num_labels == 4 or num_labels == 5:
-        df, inv_map = getLabels(df, num_labels)
-    elif num_labels == 2:
-        df = df.sample(frac=0.5, random_state=shuffle_rnd_state)
-
-    ## Extract List from string then join back together (fixes string)
-    extractList(df)
-    df["Post"] = df["Post"].apply(lambda x: " ".join(x))
-    # text = df["Post"].apply(lambda x: x.strip('][').replace("\', '", " ").lower())
-    text = df["Post"].apply(lambda x: x.lower())
-    labels = df["Label"]
-
-    test_size=0.25
-    if split_Bool == True:
-        X_train, X_test, y_train, y_test = train_test_split(text, labels, test_size = test_size, shuffle = True, stratify=labels, random_state=split_random_seed)
-        new_df = pd.DataFrame({"Post": list(X_train), "Label": y_train}, columns=['Post', 'Label'])
-    else:
-        new_df = pd.DataFrame({"Post": text, "Label": labels}, columns=['Post', 'Label'])
-
-    if emb_type == "BERT":
-        if embed_dimen.lower() == "3d":
-            outputType = "sequence"
-        elif embed_dimen.lower() == "2d":
-            outputType = "pooled"
-        else:
-            print("Incorrect embedding dimension given. Exiting...")
-            exit()
-
-        #Import bert model
-        preprocess = hub.load(preprocessor_link)
-        encoder = hub.KerasLayer(encoder_link, trainable=True)
-        BERT_Model = BERT_embeddings(preprocess, encoder, max_length, outputType)
-        # model_class, tokenizer_class, pretrained_weights = (ppb.BertModel, ppb.BertTokenizer, 'bert-base-uncased')
-        # tokenizer = tokenizer_class.from_pretrained(pretrained_weights)
-        # model = model_class.from_pretrained(pretrained_weights)
-    elif emb_type == "ConceptNet":
-        concept_Embeddings = dict()
-        f = open(numberbatch_path, encoding="utf8")
-        for line in f:
-            values = line.split()
-            word = str(values[0])
-            coefs = np.asarray(values[1:], dtype='float32')
-            concept_Embeddings[word] = coefs
-        f.close()
-        concept_Embeddings = {k.replace("_", " "): v for k, v in concept_Embeddings.items()}
-        concept_Embeddings = {k.translate(str.maketrans('', '', string.punctuation)).strip(): v for k, v in
-                              concept_Embeddings.items()}
-
-    if know_infus_bool == True:
-        df = pd.read_csv(isacore_path, header=None, index_col=0)
-        df = df.drop(index="#NAME?")
-        isacore_Embeddings = dict()
-        for index, row in df.iterrows():
-            isacore_Embeddings[str(index)] = row.to_numpy()
-        isacore_Embeddings = {k.translate(str.maketrans('', '', string.punctuation)): v for k, v in
-                              isacore_Embeddings.items()}
-
-        df = pd.read_csv(affectiveSpace_path, header=None)
-        df[0] = df[0].str.replace("_", " ")
-        df.set_index(0, inplace=True)
-        affectiveSpace_Embeddings = dict()
-        for index, row in df.iterrows():
-            affectiveSpace_Embeddings[str(index)] = row.to_numpy()
-
-        # concept_vocab_size = len(list(embeddings_index.keys()))
-        # isacore_vocab_size = len(list(isacore_Embeddings.keys()))
-        # affectiveSpace_vocab_size = len(list(isacore_Embeddings.keys()))
-        #
-        # print(f"Total Vocab Size of ConceptNet is {concept_vocab_size}")
-        # print(f"Total Vocab Size of isaCore is {isacore_vocab_size}")
-        # print(f"Total Vocab Size of affectiveSpace is {affectiveSpace_vocab_size}")
-
-    new_df = new_df.sample(frac=1, random_state=KFold_shuffle_random_seed)
-
-    if emb_type == "BERT":
-        embToken = BERT_Model
-    elif emb_type == "ConceptNet":
-        embToken = concept_Embeddings
-
-    if CV_Bool == True:
-        # Define per-fold score containers
-        acc_per_fold = []
-        loss_per_fold = []
-        fold_stats = []
-        fold_matrix = []
-        fold_hyper = []
-        test_size_per_fold = []
-
-        whole_results = pd.DataFrame({"Actual":pd.Series(dtype=int), "Predicted":pd.Series(dtype=int),
-                                      "PredictedProba":pd.Series(dtype=int), "Fold":pd.Series(dtype=int)})
-        fold_results = []
-        sfk = StratifiedKFold(n_splits=number_of_folds, shuffle=False)
-        fold_num = 1
-        for train_indx, test_indx in sfk.split(new_df["Post"], new_df["Label"]):
-
-            fold_train = new_df.iloc[train_indx].copy()
-            X_train_fold = fold_train["Post"]
-            y_train_fold = fold_train["Label"]
-
-            fold_test = new_df.iloc[test_indx].copy()
-            X_test_fold = fold_test["Post"]
-            y_test_fold = fold_test["Label"]
-
-            y_train_fold = tf.convert_to_tensor(y_train_fold)
-            y_test_fold = tf.convert_to_tensor(y_test_fold)
-            # Generate a print
-            print('------------------------------------------------------------------------')
-            print(f'Training for fold {fold_num} ...')
-
-
-            if know_infus_bool == True:
-                nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType, know_infus_bool, emb_type, max_length,
-                                                                                  num_labels, embed_dimen,split_Bool, CV_Bool, param_tune,
-                                                                                  smoteBool, weightBool, hyperparameters, number_of_folds, fold_num,
-                                                                                  X_train_fold, y_train_fold, X_test_fold, y_test_fold,
-                                                                                  embToken, isacore_Embeddings, affectiveSpace_Embeddings)
-            else:
-                nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType, know_infus_bool,
-                                                                                  emb_type, max_length,
-                                                                                  num_labels, embed_dimen, split_Bool,
-                                                                                  CV_Bool, param_tune,
-                                                                                  smoteBool, weightBool, hyperparameters,
-                                                                                  number_of_folds, fold_num,
-                                                                                  X_train_fold, y_train_fold,
-                                                                                  X_test_fold, y_test_fold,
-                                                                                  embToken)
-
-
-            train_auc = history.history['auc']
-            val_auc = history.history['val_auc']
-            train_acc = history.history['accuracy']
-            val_acc = history.history['val_accuracy']
-            train_loss = history.history['loss']
-            val_loss = history.history['val_loss']
-            epochs = range(len(train_auc))
-
-
-            fold_results.append({"train_auc":train_auc, "val_auc":val_auc, "train_acc":train_acc, "val_acc":val_acc,
-                            "train_loss":train_loss, "val_loss":val_loss, "epochs":epochs})
-
-            # Generate generalization metrics
-            print(f'Score for fold {fold_num}: {nnModel.metrics_names[0]} of {scores[0]}; {nnModel.metrics_names[1]} of {scores[1] * 100}%')
-            acc_per_fold.append(scores[1] * 100)
-            loss_per_fold.append(scores[0])
-            fold_hyper.append(hyperparameters)
-
-            y_pred = np.argmax(y_pred_proba,axis=1)
-            whole_results = pd.concat([whole_results, pd.DataFrame({"Actual":y_test_fold.numpy().tolist(), "Predicted":y_pred.tolist(),
-                                                                    "PredictedProba":y_pred_proba.tolist(), "Fold":fold_num})], ignore_index=True)
-
-            print(classification_report(y_test_fold, y_pred))
-
-            #contains precision, recall, and f1 score for each class
-            report = classification_report(y_test_fold, y_pred, output_dict=True)
-
-            #Get only precision, recall, f1-score, and support statistics
-            # filtered_report = {str(label): report[str(label)] for label in range(num_labels)}
-
-            matrix = confusion_matrix(y_test_fold, y_pred)
-            print(f"{num_labels}-label confusion matrix")
-            print(matrix)
-            #Increase Fold Number
-            fold_num = fold_num + 1
-
-            tf.keras.backend.clear_session()
-            tf.random.set_seed(seed)
-        # == Provide average scores ==
-        print('------------------------------------------------------------------------')
-        print('Score per fold')
-        for i in range(0, len(acc_per_fold)):
-            print('------------------------------------------------------------------------')
-            print(f'> Fold {i + 1} - Loss: {loss_per_fold[i]} - Accuracy: {acc_per_fold[i]}%')
-        print('------------------------------------------------------------------------')
-        print('Average scores for all folds:')
-        print(f'> Accuracy: {np.mean(acc_per_fold)} (+- {np.std(acc_per_fold)})')
-        print(f'> Loss: {np.mean(loss_per_fold)}')
-        print('------------------------------------------------------------------------')
-
-        overallResults = getStatistics(outputPath, whole_results["Actual"], whole_results["PredictedProba"], whole_results["Predicted"], num_labels)
-        # whole_results.to_csv(os.path.join(outputPath, "Actual_vs_Predicted.csv"), index=False)
-        endTime = datetime.now()
-        elapsedTime = endTime - startTime
-
-        printOverallResults(outputPath, f"New OverallResults {num_labels}Label.csv", num_labels,emb_type,max_length, smoteBool, split_Bool,
-                            number_of_folds, modelType, know_infus_bool, param_tune, overallResults, fold_hyper, elapsedTime, whole_results, fold_results)
-
-    # No CV Folds
-    else:
-        y_train = tf.convert_to_tensor(y_train)
-        y_test = tf.convert_to_tensor(y_test)
-
-        if know_infus_bool == True:
-            nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType, emb_type,
-                                                                              max_length, num_labels, embed_dimen, split_Bool, CV_Bool,
-                                                                              param_tune, smoteBool, hyperparameters, number_of_folds,
-                                                                              X_train, y_train, X_test, y_test, embToken,
-                                                                              isacore_Embeddings, affectiveSpace_Embeddings)
-        else:
-            nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath, filespath, modelType, emb_type,
-                                                                              max_length, num_labels, embed_dimen,
-                                                                              split_Bool, CV_Bool, param_tune, smoteBool,
-                                                                              hyperparameters, number_of_folds,
-                                                                              X_train, y_train, X_test, y_test, embToken)
-        y_pred = np.argmax(y_pred_proba, axis=1)
-
-        whole_results = pd.DataFrame({"Actual": y_test.numpy().tolist(), "Predicted": y_pred.tolist(),
-                                          "PredictedProba": y_pred_proba.tolist()})
-
-        overallResults = getStatistics(outputPath, whole_results["Actual"], whole_results["PredictedProba"],
-                                       whole_results["Predicted"], num_labels)
-        fold_results = []
-        # printPredictions(y_test, y_pred, num_labels, outputPath)
-        endTime = datetime.now()
-        elapsedTime = endTime - startTime
-
-        printOverallResults(outputPath, f"OverallResults {num_labels}Label (no CV).csv", num_labels, emb_type, max_length, smoteBool,
-                            split_Bool, number_of_folds, modelType, know_infus_bool, param_tune, overallResults, hyperparameters,
-                            elapsedTime, whole_results, fold_results)
-
 
 def main():
     if platform.system() == "Windows":
@@ -485,11 +492,11 @@ def main():
         filePath = r"/ddn/home12/r3102/files/500_Reddit_users_posts_labels.csv"
         outputPath = r"/ddn/home12/r3102/results"
 
-    embeddingType = "BERT"
-    # embeddingType = "ConceptNet"
+    # embeddingType = "BERT"
+    embeddingType = "ConceptNet"
 
-    # modtype = "CNN"
-    modtype = "GRU"
+    modtype = "CNN"
+    # modtype = "GRU"
     # modtype = "LSTM"
 
     maxLength = 512
@@ -506,8 +513,10 @@ def main():
     num_labels = 4
     emb_dim = "3d"
     number_of_folds = 5
+
     split = False
     cross_validation = True
+
     parameter_tune = False
     if parameter_tune == True:
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
@@ -542,9 +551,6 @@ def main():
              parameter_tune, smote_bool, weight_bool, param_grid, number_of_folds)
 
 
-preprocessor_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_preprocess/3"
-encoder_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_L-12_H-768_A-12/4"
-
 global_max_evals = 30
 if platform.system() == "Windows":
     preprocessor_link = r"https://tfhub.dev/tensorflow/bert_en_uncased_preprocess/3"
@@ -554,8 +560,8 @@ if platform.system() == "Windows":
     isacore_path = r"D:\Summer 2022 Project\isacore\isacore.csv"
     affectiveSpace_path = r"D:\Summer 2022 Project\affectivespace\affectivespace.csv"
 elif platform.system() == "Linux":
-    preprocessor_link = r"/ddn/home12/r3102/files/bert_en_uncased_preprocess_3"
-    encoder_link = r"/ddn/home12/r3102/files/bert_en_uncased_L-12_H-768_A-12_4"
+    preprocessor_link = r"/ddn/home12/r3102/files/TF_BERT/bert_en_uncased_preprocess_3"
+    encoder_link = r"/ddn/home12/r3102/files/TF_BERT/bert_en_uncased_L-12_H-768_A-12_4"
 
     numberbatch_path = r"/ddn/home12/r3102/files/numberbatch-en.txt"
     isacore_path = r"/ddn/home12/r3102/files/isacore.csv"
