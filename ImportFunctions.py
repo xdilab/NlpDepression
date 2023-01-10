@@ -88,16 +88,25 @@ def getModel(modelType):
 
     return tokenizer, model
 
-def getRegularModel(modelType):
-    if modelType.upper() == "BERT":
+def getRegularModel(modelName, modelType, CSSRS_n_label):
+    if modelName.upper() == "BERT":
         model_name = 'bert-base-uncased'
-        model = BertModel.from_pretrained(model_name)
-    elif modelType.upper() == "ROBERTA":
+        if modelType == "transformer":
+            model = TFBertForSequenceClassification.from_pretrained(model_name,num_labels = CSSRS_n_label)
+        else:
+            model = BertModel.from_pretrained(model_name)
+    elif modelName.upper() == "ROBERTA":
         model_name = 'roberta-base'
-        model = RobertaModel.from_pretrained(model_name)
-    elif modelType.upper() == "ELECTRA":
+        if modelType == "transformer":
+            model = TFRobertaForSequenceClassification.from_pretrained(model_name)
+        else:
+            model = RobertaModel.from_pretrained(model_name)
+    elif modelName.upper() == "ELECTRA":
         model_name = 'google/electra-base-discriminator'
-        model = ElectraModel.from_pretrained(model_name)
+        if modelType == "transformer":
+            model = TFElectraForSequenceClassification.from_pretrained(model_name)
+        else:
+            model = ElectraModel.from_pretrained(model_name)
 
     return model
 

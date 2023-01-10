@@ -45,10 +45,11 @@ from keras.initializers import Constant
 from keras.layers import Dense, Input, Activation, Flatten, MaxPooling1D, Dropout, Conv1D, Concatenate, Embedding
 from keras.layers import Bidirectional, LSTM, GRU, Attention, Layer, TextVectorization, MultiHeadAttention
 
-from transformers import BertTokenizer, TFBertModel, BertConfig
+from transformers import BertTokenizer, TFBertModel, BertConfig, TFBertTokenizer
 from transformers import BertModel, RobertaModel, ElectraModel
 from transformers import AdamW, AutoTokenizer
 from transformers import BertForMaskedLM, RobertaForMaskedLM, ElectraForMaskedLM
+from transformers import TFBertForSequenceClassification,  TFRobertaForSequenceClassification,  TFElectraForSequenceClassification
 from transformers import pipeline
 
 seed = 99

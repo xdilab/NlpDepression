@@ -5,148 +5,39 @@ from ModelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, R
 from HelperFunctions import getLabels, extractList,getXfromBestModelfromTrials, printPredictions, \
     printOverallResults, onehotEncode
 from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
-from StatisticsFunctions import getStatistics, getSummStats
+from StatisticsFunctions import getStatistics, getSummStats, softmax
 from ImportFunctions import importUMD, importCSSRS, getModel, getTokenizer, getRegularModel
 
-def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, emb_type, max_length, num_labels, embed_dimen, boolDict,
-            hyperparameters, n_folds, fold_num, X_train_fold, y_train_fold, X_test_fold, y_test_fold,
-            isacore_Embeddings = {}, affectiveSpace_Embeddings = {}):
+def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_length, num_labels,
+            boolDict, hyperparameters, n_folds, fold_num, datasets, mask_strat, X_train_fold, y_train_fold, X_test_fold,
+            y_test_fold, mlm_pretrain_bool, mlm_params):
 
-
-    if boolDict["KI"]:
-        isa = [x for x in isacore_Embeddings.keys() if x != ""]
-        aff = [x for x in affectiveSpace_Embeddings.keys() if x != ""]
-        # list_of_vocab = list(set(con).union(set(isa), set(aff)))
-
-        isa_vocab_size, isa_word_index, \
-        isa_train_tokens, isa_test_tokens= getTokens(standardization = "lower_and_strip_punctuation",
-                                                     splitMethod="whitespace", maxTokens = None,
-                                                     outputLength = max_length, vocab = isa, num_ngrams = 3,
-                                                     Xtrain=X_train_fold, Xtest=X_test_fold)
-
-        aff_vocab_size, aff_word_index, \
-        aff_train_tokens, aff_test_tokens = getTokens(standardization="lower_and_strip_punctuation",
-                                                      splitMethod="whitespace", maxTokens=None,
-                                                      outputLength=max_length, vocab=aff, num_ngrams=3,
-                                                      Xtrain=X_train_fold, Xtest=X_test_fold)
-
-
-    if emb_type == "ConceptNet":
-        con = [x for x in concept_Embeddings.keys() if x != ""]
-        con_vocab_size, con_word_index, \
-        con_train_tokens, con_test_tokens = getTokens(standardization="lower_and_strip_punctuation",
-                                                      splitMethod="whitespace", maxTokens=None,
-                                                      outputLength=max_length, vocab=con, num_ngrams=3,
-                                                      Xtrain=X_train_fold, Xtest=X_test_fold)
-
-        # Get embedding matrix
-        concept_embedding_matrix = np.zeros((con_vocab_size, preTrainDim))
-        j = 0
-        for word, i in con_word_index.items():
-            embedding_vector = concept_Embeddings.get(word)
-            if embedding_vector is not None:
-                concept_embedding_matrix[i] = embedding_vector
-            else:
-                j = j + 1
-        # print(f"Out of words count for Conceptnet: {j}")
-        print(f"Total Vocab Size of ConceptNet is {con_vocab_size}")
-
-
-    if boolDict["KI"]:
-        # Get Isacore embedding matrix
-        isa_embedding_matrix = np.zeros((isa_vocab_size, 100))
-        j = 0
-        for word, i in isa_word_index.items():
-            embedding_vector = isacore_Embeddings.get(word)
-            if embedding_vector is not None:
-                isa_embedding_matrix[i] = embedding_vector
-            else:
-                j = j + 1
-        # print(f"Out of words count for isaCore: {j}")
-        # Get AffectiveSpace embedding matrix
-        affectiveSpace_embedding_matrix = np.zeros((aff_vocab_size, 100))
-        j = 0
-        for word, i in aff_word_index.items():
-            embedding_vector = affectiveSpace_Embeddings.get(word)
-            if embedding_vector is not None:
-                affectiveSpace_embedding_matrix[i] = embedding_vector
-            else:
-                j = j + 1
-        # print(f"Out of words count for affectiveSpace: {j}")
-
-        print(f"Total Vocab Size of isaCore is {isa_vocab_size}")
-        print(f"Total Vocab Size of affectiveSpace is {aff_vocab_size}")
-
-    # Applying RandomOverSampler to training set
-    # Random seed set for now to make sure all pipelines overfit the same way
-    if boolDict["SMOTE"]:
-        valueCounts = pd.Series(y_train_fold).value_counts()
-        print("Before:", valueCounts)
-        # y_train_fold.value_counts()
-        over = RandomOverSampler(random_state=SMOTE_random_seed)
-        steps = [('o', over)]
-        pipeline = Pipeline(steps=steps)
-        if emb_type == "BERT":
-            train_input_ids, _ = pipeline.fit_resample(train_input_ids, y_train_fold)
-            if not boolDict["KI"]:
-                train_attention_masks, y_train_fold = pipeline.fit_resample(train_attention_masks, y_train_fold)
-            else:
-                train_attention_masks, _ = pipeline.fit_resample(train_attention_masks, y_train_fold)
-                isa_train_tokens, _ = pipeline.fit_resample(isa_train_tokens, y_train_fold)
-                aff_train_tokens, y_train_fold = pipeline.fit_resample(aff_train_tokens, y_train_fold)
-
-        if emb_type == "ConceptNet":
-            if not boolDict["KI"]:
-                con_train_tokens, y_train_fold = pipeline.fit_resample(con_train_tokens, y_train_fold)
-            else:
-                con_train_tokens, _ = pipeline.fit_resample(con_train_tokens, y_train_fold)
-                isa_train_tokens, _ = pipeline.fit_resample(isa_train_tokens, y_train_fold)
-                aff_train_tokens, y_train_fold = pipeline.fit_resample(aff_train_tokens, y_train_fold)
-            print("After:", pd.Series(y_train_fold).value_counts())
 
     # Convert to BERT embeddings for BERT models
-    if emb_type == "BERT":
+    if modelType != "transformer":
         # text, tokenizer, model, 2d or 3d embeddings
         X_train_emb_fold = getFeatures(text=X_train_fold, tokenizer=tokenizer, model=model, model_name=model_name,
                                        max_length=max_length, return_tensor_type="pt")
         X_test_emb_fold = getFeatures(text=X_test_fold, tokenizer=tokenizer, model=model, model_name=model_name,
                                       max_length=max_length, return_tensor_type="pt")
         number_channels, number_features = X_train_emb_fold.shape[1], X_train_emb_fold.shape[2]
-    elif emb_type == "ConceptNet":
-        # Rename tokens for ConceptNet models for simplicity of coding
-        X_train_emb_fold = con_train_tokens
-        X_test_emb_fold = con_test_tokens
-        number_channels, number_features = 512, 768
 
-    X_train_emb_fold = tf.convert_to_tensor(X_train_emb_fold)
-    X_test_emb_fold = tf.convert_to_tensor(X_test_emb_fold)
-
-    if boolDict["KI"]:
-        isa_train_tokens = tf.convert_to_tensor(isa_train_tokens)
-        isa_test_tokens = tf.convert_to_tensor(isa_test_tokens)
-        aff_train_tokens = tf.convert_to_tensor(aff_train_tokens)
-        aff_test_tokens = tf.convert_to_tensor(aff_test_tokens)
-
-    if boolDict["KI"]:
-        modelTrain = [X_train_emb_fold, isa_train_tokens, aff_train_tokens]
-        modelTest = [X_test_emb_fold, isa_test_tokens, aff_test_tokens]
+    if modelType != "transformer":
+        modelTrain = tf.convert_to_tensor(X_train_emb_fold)
+        modelTest = tf.convert_to_tensor(X_test_emb_fold)
     else:
-        modelTrain = X_train_emb_fold
-        modelTest = X_test_emb_fold
-
-
-    if boolDict["KI"] == True and emb_type == "ConceptNet":
-        vocab_sizes = [con_vocab_size, isa_vocab_size, aff_vocab_size]
-        embed_matrices = [concept_embedding_matrix, isa_embedding_matrix, affectiveSpace_embedding_matrix]
-    elif boolDict["KI"] == False and emb_type == "ConceptNet":
-        vocab_sizes = [con_vocab_size]
-        embed_matrices = [concept_embedding_matrix]
-    elif boolDict["KI"] == True and emb_type == "BERT":
-        vocab_sizes = [isa_vocab_size, aff_vocab_size]
-        embed_matrices = [isa_embedding_matrix, affectiveSpace_embedding_matrix]
-    elif boolDict["KI"] == False and emb_type == "BERT":
-        vocab_sizes = []
-        embed_matrices = []
+        input_ids, input_masks, input_segments = [], [], []
+        # print(X_train_fold.to_list())
+        trainOut = tokenizer(X_train_fold.to_list(), return_tensors="np",max_length=max_length,
+                                                truncation=True,padding='max_length')
+        modelTrain = {"input_ids":trainOut['input_ids'],
+                      "token_type_ids":trainOut['token_type_ids'],
+                      'attention_mask':trainOut['attention_mask']}
+        testOut = tokenizer(X_test_fold.to_list(), return_tensors="np", max_length=max_length,
+                               truncation=True, padding='max_length')
+        modelTest = {"input_ids": testOut['input_ids'],
+                      "token_type_ids": testOut['token_type_ids'],
+                      'attention_mask': testOut['attention_mask']}
 
     if boolDict["weight"]:
         # Generate class weights & One-hot encode labels
@@ -170,14 +61,13 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, emb_
         y_test_fold = convert_to_tensor(onehotTest)
 
 
-    if boolDict["KI"]:
-        checkpointName = f"{emb_type}_{modelType}_with_KI_best_model.h5"
-    else:
-        checkpointName = f"{emb_type}_{modelType}_no_KI_best_model.h5"
 
-    es = EarlyStopping(monitor='val_auc', mode="max", patience=10, min_delta=0)
-    mc = ModelCheckpoint(checkpointName, monitor='val_auc', mode='max', verbose=0,
-                         save_best_only=True)
+    checkpointName = f"{model_name}_{modelType}_{'with' if boolDict['KI'] else 'no'}_KI_best_model.ckpt"
+
+
+    es = EarlyStopping(monitor='val_auc', mode="max", patience=20, min_delta=0)
+    # mc = ModelCheckpoint(checkpointName, monitor='val_auc', mode='max', verbose=0,
+    #                      save_best_only=True)
 
     if boolDict["tuning"]:
         param_grid = hyperparameters
@@ -212,24 +102,41 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, emb_
     elif modelType == "GRU" or modelType == "LSTM":
         nnModel = RNNModel(hyperparameters, number_channels, number_features, num_labels, emb_type, model_name,
                            modelType, boolDict["KI"], embed_dimen, preTrainDim, max_length, vocab_sizes, embed_matrices)
+    elif modelType == "transformer":
+        nnModel =model
+        metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
+        # if num_labels == 2:
+        #     loss = 'binary_crossentropy'
+        # else:
+        loss = 'categorical_crossentropy'
+        nnModel.compile(optimizer=Adam(learning_rate=hyperparameters["learning_rate"]),
+                     loss=loss,
+                     metrics=metrics)
+        nnModel.summary()
 
     if boolDict["weight"]:
+        # print(modelTrain[0])
+        # modelTrain = modelTrain.apply(lambda x: x.data)
+        # print(modelTrain[0])
+        # print(type(modelTrain))
+        # print(modelTrain[0]["input_ids"])
+
         history = nnModel.fit(modelTrain, y_train_fold,
                               validation_data=(modelTrain, y_train_fold),
                               epochs=hyperparameters["epochs"],
-                              batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
+                              batch_size=hyperparameters["batch_size"], callbacks=[es],
                               class_weight=class_weights,verbose=2)
     else:
 
         history = nnModel.fit(modelTrain, y_train_fold,
                               validation_data=(modelTrain, y_train_fold),
                               epochs=hyperparameters["epochs"],
-                              batch_size=hyperparameters["batch_size"], callbacks=[es, mc],
+                              batch_size=hyperparameters["batch_size"], callbacks=[es],
                               verbose=2)
 
     tf.keras.backend.clear_session()
     tf.random.set_seed(seed)
-    nnModel = load_model(checkpointName)
+    # nnModel = load_model(checkpointName)
     scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
     y_pred_proba = nnModel.predict(modelTest)
 
@@ -237,11 +144,27 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, emb_
     return nnModel, history, scores, y_pred_proba, hyperparameters
 
 def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearning, mlm_pretrain, CSSRS_n_label, boolDict,
-        embed_dimen, hyperparameters, n_folds, modelType, max_length):
+        hyperparameters, n_folds, modelType, max_length, datasets, mask_strat):
+
+    ##-----MLM Pre-training-----
     if mlm_pretrain:
         tokenizer, model = getModel(model_name)
 
-        task_train, task_test = importUMD(UMD_path, "crowd", "A")
+        split_dataset_name = datasets["pretrain"].split("-")
+        if split_dataset_name[0] == "UMD":
+            if split_dataset_name[1] == "crowd":
+                task_train, task_test = importUMD(UMD_path, split_dataset_name[1], split_dataset_name[2])
+            elif split_dataset_name[1] == "expert":
+                task_train, task_test = importUMD(UMD_path, split_dataset_name[1])
+
+        elif split_dataset_name[0] == "CSSRS":
+            CSSRS = importCSSRS(CSSRS_path, num_labels=CSSRS_n_label)
+            # Make all text lowercase
+            text = CSSRS["Post"].apply(lambda x: x.lower())
+            labels = CSSRS["Label"]
+        else:
+            print("Incorrect input for pretrain dataset. Exiting...")
+            exit(1)
         # For now, remove all posts with empty post_body (i.e. just post title)
         task_train = task_train[task_train["post_body"].notnull()]  # Removes 72 posts
         task_test = task_test[task_test["post_body"].notnull()]  # Removes 5 posts
@@ -249,12 +172,14 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
         task_train = task_train.sort_values(by=["user_id", "timestamp"], ascending=[True, True], ignore_index=True)
         task_test = task_test.sort_values(by=["user_id", "timestamp"], ascending=[True, True], ignore_index=True)
         task_train["model_input"] = task_train["post_body"].map(lambda x: MaskingFunction(x, tokenizer=tokenizer,
+                                                                                          masking_strat=mask_strat,
                                                                                           custom_masking=False,
-                                                                                          max_length=512,
+                                                                                          max_length=max_length,
                                                                                           return_tensor_type="pt"))
         task_test["model_input"] = task_test["post_body"].map(lambda x: MaskingFunction(x, tokenizer=tokenizer,
+                                                                                        masking_strat=mask_strat,
                                                                                         custom_masking=False,
-                                                                                        max_length=512,
+                                                                                        max_length=max_length,
                                                                                         return_tensor_type="pt"))
 
         train_model_input = {key: torch.stack([i[key][0] for i in task_train["model_input"]]) for key in
@@ -271,7 +196,7 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
         # and move our model over to the selected device
         model.to(device)
         # initialize optimizer
-        optim = torch.optim.AdamW(model.parameters(), lr=5e-5)
+        optim = torch.optim.AdamW(model.parameters(), lr=mlm_params["learning_rate"])
 
         # activate training mode
         model.train()
@@ -296,27 +221,10 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
 
     ##-----Regular modeling-----
     if transferLearning:
-        model_path = fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}"
-        if model_name == "BERT":
-            if os.path.exists(model_path):
-                model = BertModel.from_pretrained(fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
-            else:
-                print("No transfer learning applied. Loading from huggingface checkpoint.")
-                model = getRegularModel(model_name)
-        elif model_name == "ROBERTA":
-            if os.path.exists(model_path):
-                model = RobertaModel.from_pretrained(fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
-            else:
-                print("No transfer learning applied. Loading from huggingface checkpoint.")
-                model = getRegularModel(model_name)
-        elif model_name == "ELECTRA":
-            if os.path.exists(model_path):
-                model = ElectraModel.from_pretrained(fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
-            else:
-                print("No transfer learning applied. Loading from huggingface checkpoint.")
-                model = getRegularModel(model_name)
-        model.eval()
-        tokenizer = getTokenizer(model_name)
+
+        # Models not for sequence classification are run in pytorch
+        if modelType != "transformer":
+            model.eval()
 
         if tf.test.gpu_device_name():
             print('GPU: {}'.format(tf.test.gpu_device_name()))
@@ -346,7 +254,6 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
 
         # Create alias for principal embedding
         # Holdover from previous code. Will remove once I remove all the principal conceptnet embedding code
-        emb_type = "BERT"
 
         if boolDict["CV"] == True:
             # Define per-fold score containers
@@ -380,30 +287,58 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
                 print('------------------------------------------------------------------------')
                 print(f'Training for fold {fold_num} ...')
 
-                if boolDict["KI"]:
-                    nnModel, history, scores, \
-                    y_pred_proba, hyperparameters = runFold(outputPath=outputPath, filespath=CSSRS_path,
-                                                            model=model, tokenizer=tokenizer,
-                                                            model_name=model_name, modelType=modelType,
-                                                            emb_type=emb_type, max_length=max_length,
-                                                            num_labels=CSSRS_n_label, embed_dimen=embed_dimen,
-                                                            hyperparameters=hyperparameters, n_folds=n_folds,
-                                                            fold_num=fold_num, X_train_fold=X_train_fold,
-                                                            y_train_fold=y_train_fold, X_test_fold=X_test_fold,
-                                                            y_test_fold=y_test_fold, boolDict=boolDict,
-                                                            isacore_Embeddings=isacore_Embeddings,
-                                                            affectiveSpace_Embeddings=affectiveSpace_Embeddings)
-                else:
-                    nnModel, history, scores, \
-                    y_pred_proba, hyperparameters = runFold(outputPath=outputPath, filespath=CSSRS_path,
-                                                            model=model, tokenizer=tokenizer,
-                                                            model_name=model_name, modelType=modelType,
-                                                            emb_type=emb_type, max_length=max_length,
-                                                            num_labels=CSSRS_n_label, embed_dimen=embed_dimen,
-                                                            hyperparameters=hyperparameters, n_folds=n_folds,
-                                                            fold_num=fold_num, X_train_fold=X_train_fold,
-                                                            y_train_fold=y_train_fold, X_test_fold=X_test_fold,
-                                                            y_test_fold=y_test_fold, boolDict=boolDict)
+                model_path = fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}"
+                if model_name == "BERT":
+                    if os.path.exists(model_path):
+                        if modelType == "transformer":
+                            model = TFBertForSequenceClassification.from_pretrained(
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True,
+                                num_labels=CSSRS_n_label)
+                        else:
+                            model = BertModel.from_pretrained(
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
+                    else:
+                        print("No transfer learning applied. Loading from huggingface checkpoint.")
+                        model = getRegularModel(model_name, modelType, CSSRS_n_label)
+
+                elif model_name == "ROBERTA":
+                    if os.path.exists(model_path, modelType):
+                        if modelType == "transformer":
+                            model = TFRobertaForSequenceClassification.from_pretrained(
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True)
+                        else:
+                            model = RobertaModel.from_pretrained(
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
+                    else:
+                        print("No transfer learning applied. Loading from huggingface checkpoint.")
+                        model = getRegularModel(model_name, modelType)
+
+                elif model_name == "ELECTRA":
+                    if os.path.exists(model_path):
+                        if modelType == "transformer":
+                            model = TFElectraForSequenceClassification.from_pretrained(
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True)
+                        else:
+                            model = ElectraModel.from_pretrained(
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
+                    else:
+                        print("No transfer learning applied. Loading from huggingface checkpoint.")
+                        model = getRegularModel(model_name, modelType)
+
+                tokenizer = getTokenizer(model_name)
+
+
+                nnModel, history, scores, \
+                y_pred_proba, hyperparameters = runFold(outputPath=outputPath, filespath=CSSRS_path,
+                                                        model=model, tokenizer=tokenizer,
+                                                        model_name=model_name, modelType=modelType,
+                                                        max_length=max_length, num_labels=CSSRS_n_label,
+                                                        hyperparameters=hyperparameters, n_folds=n_folds,
+                                                        mlm_params=mlm_params, mlm_pretrain_bool=mlm_pretrain,
+                                                        fold_num=fold_num, datasets=datasets, mask_strat=mask_strat,
+                                                        X_train_fold=X_train_fold, y_train_fold=y_train_fold,
+                                                        X_test_fold=X_test_fold, y_test_fold=y_test_fold,
+                                                        boolDict=boolDict)
 
                 train_auc = history.history['auc']
                 val_auc = history.history['val_auc']
@@ -424,10 +359,15 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
                 loss_per_fold.append(scores[0])
                 fold_hyper.append(hyperparameters)
 
-                y_pred = np.argmax(y_pred_proba, axis=1)
+
+                list_probs = list(map(softmax, y_pred_proba.logits))
+                list_probs = [l.tolist() for l in list_probs]
+                # print(y_pred_proba.logits.map(lambda x: softmax()))
+                y_pred = np.argmax(list_probs, axis=1)
+
                 whole_results = pd.concat(
                     [whole_results, pd.DataFrame({"Actual": y_test_fold.numpy().tolist(), "Predicted": y_pred.tolist(),
-                                                  "PredictedProba": y_pred_proba.tolist(), "Fold": fold_num})],ignore_index=True)
+                                                  "PredictedProba": list_probs, "Fold": fold_num})],ignore_index=True)
 
                 print(classification_report(y_test_fold, y_pred))
 
@@ -464,41 +404,31 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
             elapsedTime = endTime - startTime
 
             printOverallResults(outputPath=outputPath, fileName=f"OverallResults {CSSRS_n_label}Label.csv",
-                                n_label=CSSRS_n_label, emb_type=emb_type, max_length=max_length, boolDict=boolDict,
-                                numCV=n_folds, model_type=modelType, stats=overallResults,
+                                n_label=CSSRS_n_label, max_length=max_length, boolDict=boolDict,
+                                numCV=n_folds, model_type=modelType, stats=overallResults, pretrain_bool = mlm_pretrain,
                                 hyperparameters=fold_hyper, execTime=elapsedTime, whole_results=whole_results,
-                                fold_results=fold_results, model_name=model_name)
+                                fold_results=fold_results, model_name=model_name, datasets=datasets, mask_strat=mask_strat,
+                                mlm_params=mlm_params)
         else:
-            y_train = tf.convert_to_tensor(y_train)
-            y_test = tf.convert_to_tensor(y_test)
+            # pass
+            # y_train = tf.convert_to_tensor(y_train)
+            # y_test = tf.convert_to_tensor(y_test)
 
-            if boolDict["KI"] == True:
-                nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath=outputPath, filespath=CSSRS_path,
+            nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath=outputPath, filespath=CSSRS_path,
                                                                                   model=model, tokenizer=tokenizer,
                                                                                   model_name=model_name, modelType=modelType,
-                                                                                  emb_type=emb_type,
                                                                                   max_length=max_length, num_labels=CSSRS_n_label,
-                                                                                  embed_dimen=embed_dimen,
                                                                                   hyperparameters=hyperparameters,
                                                                                   n_folds=n_folds, fold_num=1,
-                                                                                  X_train_fold=X_train, y_train_fold=y_train,
-                                                                                  X_test_fold=X_test, y_test_fold=y_test,
-                                                                                  boolDict=boolDict,
-                                                                                  isacore_Embeddings=isacore_Embeddings,
-                                                                                  affectiveSpace_Embeddings=affectiveSpace_Embeddings)
-            else:
-                nnModel, history, scores, y_pred_proba, hyperparameters = runFold(outputPath=outputPath, filespath=CSSRS_path,
-                                                                                  model=model, tokenizer=tokenizer,
-                                                                                  model_name=model_name, modelType=modelType,
-                                                                                  emb_type=emb_type,
-                                                                                  max_length=max_length, num_labels=CSSRS_n_label,
-                                                                                  embed_dimen=embed_dimen,
-                                                                                  hyperparameters=hyperparameters,
-                                                                                  n_folds=n_folds, fold_num=1,
+                                                                                  mlm_pretrain_bool = mlm_pretrain,
+                                                                                  datasets=datasets, mask_strat=mask_strat,
                                                                                   X_train_fold=X_train, y_train_fold=y_train,
                                                                                   X_test_fold=X_test, y_test_fold=y_test,
                                                                                   boolDict=boolDict)
-            y_pred = np.argmax(y_pred_proba, axis=1)
+
+            list_probs = list(map(softmax, y_pred_proba.logits))
+            list_probs = [l.tolist() for l in list_probs]
+            y_pred = np.argmax(list_probs, axis=1)
 
             whole_results = pd.DataFrame({"Actual": y_test.numpy().tolist(), "Predicted": y_pred.tolist(),
                                           "PredictedProba": y_pred_proba.tolist()})
@@ -512,29 +442,30 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
 
             printOverallResults(outputPath=outputPath, fileName=f"OverallResults {CSSRS_n_label}Label (no CV).csv",
                                 n_label=CSSRS_n_label, emb_type=emb_type, max_length=max_length, boolDict=boolDict,
-                                numCV=n_folds, model_type=modelType, stats=overallResults,
+                                numCV=n_folds, model_type=modelType, stats=overallResults, pretrain_bool=mlm_pretrain,
                                 hyperparameters=hyperparameters,execTime=elapsedTime, whole_results=whole_results,
-                                fold_results=fold_results, model_name=model_name)
+                                fold_results=fold_results, model_name=model_name, mlm_params=mlm_params)
 
 def main():
     if platform.system() == "Windows":
         filePath = r"D:\Summer 2022 Project\Reddit C-SSRS\500_Reddit_users_posts_labels.csv"
         outputPath = r"D:\zProjects\MLM\Output\CSSRS"
 
-        UMD_path = r"C:\Users\dmlee\Desktop\Summer_Project\Fall 2022\umd_reddit_suicidewatch_dataset_v2"
+        UMD_path = r"D:\zProjects\umd_reddit_suicidewatch_dataset_v2"
         CSSRS_path = r"D:\Summer 2022 Project\Reddit C-SSRS\500_Reddit_users_posts_labels.csv"
     elif platform.system() == "Linux":
         filePath = r"/ddn/home12/r3102/files/500_Reddit_users_posts_labels.csv"
         outputPath = r"/ddn/home12/r3102/results"
 
     # All models currently implemented are the base uncased versions
-    # model_name = "BERT"
-    model_name = "ROBERTA"
+    model_name = "BERT"
+    # model_name = "ROBERTA"
     # model_name = "ELECTRA"
 
     # modType = "CNN"
-    modType = "GRU"
+    # modType = "GRU"
     # modType = "LSTM"
+    modType = "transformer"
 
     # mlm_pretrain = True
     mlm_pretrain = False
@@ -542,18 +473,26 @@ def main():
     transferLearn = True
     # transferLearn = False
 
+    pretrain_datset = "UMD-crowd-A"
+    # pretrain_datset = "UMD-expert"
+    task_dataset = "CSSRS"
+    datasets = {"pretrain":pretrain_datset, "task":task_dataset}
+
+    masking_strategy = "random"
+    # masking_strategy = "entity"
+
 
     CSSRS_n_labels = 4
     number_of_folds = 5
-    max_length = 512
+    max_length = 100
 
-    mlm_params = {"epochs":10, "batch_size":16}
+    mlm_params = {"epochs":10, "batch_size":16, "learning_rate":1e-5}
 
     splitBool = False
     CVBool = True
     know_infuse = False
     SMOTE_bool = False
-    weight_bool = True
+    weight_bool = False
 
     parameter_tune = False
     if parameter_tune == True:
@@ -566,7 +505,7 @@ def main():
         param_grid = {"batch_size": 32,          #32, 4 for original CNN
                       "dropout": 0.25,           #0.25 for RNN, 0.3 for CNN
                       "epochs": 10,              #10, 50 for original CNN
-                      "learning_rate":0.001,     #0.001
+                      "learning_rate":0.0001,     #0.001
                       "rnn_nodes":128,           #128
                       "1st_dense":300,           #300
                       "2nd_dense":100}           #100
@@ -577,8 +516,7 @@ def main():
     #embed_dimen holdover from previous code. Will eventually remove after cleaning up old references
     run(outputPath=outputPath,UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
         mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, CSSRS_n_label=CSSRS_n_labels, boolDict=boolDict, hyperparameters=param_grid,
-        n_folds= number_of_folds, modelType=modType, max_length=max_length,
-        embed_dimen="3D")
+        n_folds= number_of_folds, modelType=modType, max_length=max_length, datasets=datasets, mask_strat=masking_strategy)
 
 
 global_max_evals = 30

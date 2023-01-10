@@ -40,8 +40,47 @@ def onehotEncode(labels):
     new_labels = convert_to_tensor(onehot_encoded)
     return new_labels
 
-def printOverallResults(outputPath, fileName, n_label, model_name, emb_type, max_length, boolDict, numCV, model_type,
-                        stats, hyperparameters, execTime, whole_results, fold_results):
+def printOverallResults(outputPath, fileName, n_label, model_name, max_length, boolDict, numCV, model_type,
+                        stats, hyperparameters, execTime, whole_results, fold_results, datasets, mask_strat, pretrain_bool,
+                        mlm_params):
+    """
+    :param outputPath:
+        path to folder to save all files
+    :param fileName:
+        name of file to save results (csv with overall results)
+    :param n_label:
+        For now, the number of CSSRS labels.
+    :param model_name:
+        Type of transformer model
+    :param max_length:
+        Maximum token length
+    :param boolDict:
+        Dictionary of boolean values: Tradiational train-test split, Cross-validation, Knowledge infusion,
+                                      Class-based loss weighting, and parameter tuning
+    :param numCV:
+        Number of cross-validation folds
+    :param model_type:
+        Type of model on head of tranformer/embeddings. Note that 'transformer' only means not using CNN/GRU/LSTM head
+    :param stats:
+        Dict of various statistics
+    :param hyperparameters:
+        List of hyperparameters for each fold
+    :param execTime:
+        The total execution time of model
+    :param whole_results:
+        The overall results
+    :param fold_results:
+        Results for each fold
+    :param datasets:
+        The datasets utilized for pre-training and main task
+    :param mask_strat:
+        Type of masking strategy used for MLM. Note that only random masking currently supported
+    :param pretrain_bool:
+        Boolean value whether MLM pre-training performed
+    :param mlm_params:
+        Dict of hyperparameters for pre-training
+    :return:
+    """
     if boolDict["CV"]:
         outputPath = os.path.join(outputPath, "CV", f"[{numCV} Folds]")
     elif boolDict["split"]:
@@ -50,16 +89,27 @@ def printOverallResults(outputPath, fileName, n_label, model_name, emb_type, max
     if not os.path.exists(outputPath):
         os.makedirs(outputPath)
 
-    if boolDict["SMOTE"]:
-        weighting = "SMOTE"
-    elif boolDict["weight"]:
+    if boolDict["weight"]:
         weighting = "Loss"
     else:
         weighting = "None"
 
+    if pretrain_bool:
+        pretrain_str = "Transfer"
+        mask_str = mask_strat
+        transf_data = datasets["pretrain"]
+        transf_params = str(mlm_params)
+    else:
+        pretrain_str = "Base"
+        mask_str = ""
+        transf_data = ""
+        transf_params = ""
+
     hours, minutes, seconds = str(execTime).split(":")
-    results = pd.DataFrame({"Number of labels":n_label, "Embedding":model_name, "Max Sentence Length":max_length,
-                            "Model":model_type, "Knowledge Infusion": boolDict["KI"], "Weighting":weighting,
+    results = pd.DataFrame({"Number of labels":n_label, "Dynamic Model":model_name,"Pre-training":pretrain_str,
+                            "Transfer Dataset":transf_data, "Masking":mask_str, "Transfer Hyperparameters":transf_params,
+                            "Task Dataset":datasets["task"],"Max Sentence Length":max_length,
+                            "Model":model_type, "Weighting":weighting,
                             "Parameter Tuning":boolDict["tuning"] ,"CV Folds":numCV,
                             "Macro Average":stats["accuracy"],"Precision":stats["macro avg"]["precision"],
                             "Recall":stats["macro avg"]["recall"],"F1-score":stats["macro avg"]["f1-score"],
@@ -90,14 +140,16 @@ def printOverallResults(outputPath, fileName, n_label, model_name, emb_type, max
     if boolDict["CV"]:
         if numCV == 5:
             if n_label == 4:
-                results = results[["QID", "Number of labels", "Embedding", "Max Sentence Length", "Model", "Knowledge Infusion",
+                results = results[["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset",
+                                   "Masking", "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
                                    "Weighting", "Parameter Tuning", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy","Label 2 Accuracy","Label 3 Accuracy",
                                    "Macro Average","Precision", "Recall","F1-score", "AUC", "New False Positive Rate","New False Negative Rate",
                                "Ordinal Error", "Fold 1 Hyperparameters", "Fold 2 Hyperparameters", "Fold 3 Hyperparameters",
                                    "Fold 4 Hyperparameters","Fold 5 Hyperparameters", "Execution Time", "random.seed", "np seed",
                                    "tf seed", "train_test split seed", "SMOTE seed", "KFold seed"]]
             elif n_label == 5:
-                results = results[["QID", "Number of labels", "Embedding", "Max Sentence Length", "Model", "Knowledge Infusion",
+                results = results[["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset",
+                                   "Masking", "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
                                    "Weighting", "Parameter Tuning", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy", "Label 3 Accuracy",
                                    "Label 4 Accuracy","Macro Average", "Precision", "Recall", "F1-score", "AUC", "New False Positive Rate",
                                "New False Negative Rate", "Ordinal Error", "Fold 1 Hyperparameters", "Fold 2 Hyperparameters",
@@ -106,14 +158,16 @@ def printOverallResults(outputPath, fileName, n_label, model_name, emb_type, max
     elif boolDict["split"]:
         if n_label == 4:
             results = results[
-                ["QID", "Number of labels", "Embedding", "Max Sentence Length", "Model", "Knowledge Infusion",
+                ["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset","Masking",
+                 "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
                  "Weighting", "Parameter Tuning", "CV Folds", "Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy",
                  "Label 3 Accuracy","Macro Average", "Precision", "Recall", "F1-score", "AUC", "New False Positive Rate",
                  "New False Negative Rate","Ordinal Error", "Hyperparameters", "Execution Time", "random.seed", "np seed",
                  "tf seed", "train_test split seed", "SMOTE seed", "KFold seed"]]
         elif n_label == 5:
             results = results[
-                ["QID", "Number of labels", "Embedding", "Max Sentence Length", "Model", "Knowledge Infusion",
+                ["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset","Masking",
+                 "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
                  "Weighting", "Parameter Tuning", "CV Folds", "Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy",
                  "Label 3 Accuracy","Label 4 Accuracy", "Macro Average", "Precision", "Recall", "F1-score", "AUC",
                  "New False Positive Rate",
