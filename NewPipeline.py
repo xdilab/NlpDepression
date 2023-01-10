@@ -447,14 +447,16 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
 
 def main():
     if platform.system() == "Windows":
-        filePath = r"D:\Summer 2022 Project\Reddit C-SSRS\500_Reddit_users_posts_labels.csv"
         outputPath = r"D:\zProjects\MLM\Output\CSSRS"
 
         UMD_path = r"D:\zProjects\umd_reddit_suicidewatch_dataset_v2"
         CSSRS_path = r"D:\Summer 2022 Project\Reddit C-SSRS\500_Reddit_users_posts_labels.csv"
     elif platform.system() == "Linux":
-        filePath = r"/ddn/home12/r3102/files/500_Reddit_users_posts_labels.csv"
-        outputPath = r"/ddn/home12/r3102/results"
+        outputPath = r"/ddn/home12/r3102/results/MLM"
+
+        UMD_path = r"/ddn/home12/r3102/datasets/umd_reddit_suicidewatch_dataset_v2"
+        CSSRS_path = r"/ddn/home12/r3102/datasets/500_Reddit_users_posts_labels.csv"
+
 
     # All models currently implemented are the base uncased versions
     model_name = "BERT"
