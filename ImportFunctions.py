@@ -98,13 +98,13 @@ def getRegularModel(modelName, modelType, CSSRS_n_label):
     elif modelName.upper() == "ROBERTA":
         model_name = 'roberta-base'
         if modelType == "transformer":
-            model = TFRobertaForSequenceClassification.from_pretrained(model_name)
+            model = TFRobertaForSequenceClassification.from_pretrained(model_name,num_labels = CSSRS_n_label)
         else:
             model = RobertaModel.from_pretrained(model_name)
     elif modelName.upper() == "ELECTRA":
         model_name = 'google/electra-base-discriminator'
         if modelType == "transformer":
-            model = TFElectraForSequenceClassification.from_pretrained(model_name)
+            model = TFElectraForSequenceClassification.from_pretrained(model_name,num_labels = CSSRS_n_label)
         else:
             model = ElectraModel.from_pretrained(model_name)
 

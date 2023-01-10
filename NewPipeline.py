@@ -103,23 +103,20 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_
         nnModel = RNNModel(hyperparameters, number_channels, number_features, num_labels, emb_type, model_name,
                            modelType, boolDict["KI"], embed_dimen, preTrainDim, max_length, vocab_sizes, embed_matrices)
     elif modelType == "transformer":
-        nnModel =model
+
+        nnModel = model
         metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
         # if num_labels == 2:
         #     loss = 'binary_crossentropy'
         # else:
-        loss = 'categorical_crossentropy'
+        # loss = 'categorical_crossentropy'
+        loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
         nnModel.compile(optimizer=Adam(learning_rate=hyperparameters["learning_rate"]),
                      loss=loss,
                      metrics=metrics)
         nnModel.summary()
-
+    # print(y_train_fold)
     if boolDict["weight"]:
-        # print(modelTrain[0])
-        # modelTrain = modelTrain.apply(lambda x: x.data)
-        # print(modelTrain[0])
-        # print(type(modelTrain))
-        # print(modelTrain[0]["input_ids"])
 
         history = nnModel.fit(modelTrain, y_train_fold,
                               validation_data=(modelTrain, y_train_fold),
@@ -305,7 +302,8 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
                     if os.path.exists(model_path, modelType):
                         if modelType == "transformer":
                             model = TFRobertaForSequenceClassification.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True)
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True,
+                                num_labels=CSSRS_n_label)
                         else:
                             model = RobertaModel.from_pretrained(
                                 fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
@@ -317,7 +315,8 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
                     if os.path.exists(model_path):
                         if modelType == "transformer":
                             model = TFElectraForSequenceClassification.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True)
+                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True,
+                                num_labels=CSSRS_n_label)
                         else:
                             model = ElectraModel.from_pretrained(
                                 fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
@@ -441,7 +440,7 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
             elapsedTime = endTime - startTime
 
             printOverallResults(outputPath=outputPath, fileName=f"OverallResults {CSSRS_n_label}Label (no CV).csv",
-                                n_label=CSSRS_n_label, emb_type=emb_type, max_length=max_length, boolDict=boolDict,
+                                n_label=CSSRS_n_label, max_length=max_length, boolDict=boolDict,
                                 numCV=n_folds, model_type=modelType, stats=overallResults, pretrain_bool=mlm_pretrain,
                                 hyperparameters=hyperparameters,execTime=elapsedTime, whole_results=whole_results,
                                 fold_results=fold_results, model_name=model_name, mlm_params=mlm_params)
