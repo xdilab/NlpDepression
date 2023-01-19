@@ -3,14 +3,14 @@
 from Libraries import *
 from ModelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, RNNModel, objectiveFunctionRNN
 from HelperFunctions import getLabels, extractList,getXfromBestModelfromTrials, printPredictions, \
-    printOverallResults, onehotEncode
+    printOverallResults, onehotEncode, printMLMResults
 from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
 from StatisticsFunctions import getStatistics, getSummStats, softmax
-from ImportFunctions import importUMD, importCSSRS, getModel, getTokenizer, getRegularModel
+from ImportFunctions import importUMD, importCSSRS, getModel, getTokenizer, getRegularModel, getMainTaskModel
 
 def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_length, num_labels,
             boolDict, hyperparameters, n_folds, fold_num, datasets, mask_strat, X_train_fold, y_train_fold, X_test_fold,
-            y_test_fold, mlm_pretrain_bool, mlm_params):
+            y_test_fold, mlm_pretrain_bool, mlm_params, few_shot):
 
 
     # Convert to BERT embeddings for BERT models
@@ -22,6 +22,7 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_
                                       max_length=max_length, return_tensor_type="pt")
         number_channels, number_features = X_train_emb_fold.shape[1], X_train_emb_fold.shape[2]
 
+
     if modelType != "transformer":
         modelTrain = tf.convert_to_tensor(X_train_emb_fold)
         modelTest = tf.convert_to_tensor(X_test_emb_fold)
@@ -30,14 +31,22 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_
         # print(X_train_fold.to_list())
         trainOut = tokenizer(X_train_fold.to_list(), return_tensors="np",max_length=max_length,
                                                 truncation=True,padding='max_length')
-        modelTrain = {"input_ids":trainOut['input_ids'],
-                      "token_type_ids":trainOut['token_type_ids'],
-                      'attention_mask':trainOut['attention_mask']}
+
         testOut = tokenizer(X_test_fold.to_list(), return_tensors="np", max_length=max_length,
-                               truncation=True, padding='max_length')
-        modelTest = {"input_ids": testOut['input_ids'],
-                      "token_type_ids": testOut['token_type_ids'],
-                      'attention_mask': testOut['attention_mask']}
+                            truncation=True, padding='max_length')
+
+        if model_name != "ROBERTA":
+            modelTrain = {"input_ids":trainOut['input_ids'],
+                          "token_type_ids":trainOut['token_type_ids'],
+                          'attention_mask':trainOut['attention_mask']}
+            modelTest = {"input_ids": testOut['input_ids'],
+                          "token_type_ids": testOut['token_type_ids'],
+                          'attention_mask': testOut['attention_mask']}
+        else:
+            modelTrain = {"input_ids": trainOut['input_ids'],
+                          'attention_mask': trainOut['attention_mask']}
+            modelTest = {"input_ids": testOut['input_ids'],
+                         'attention_mask': testOut['attention_mask']}
 
     if boolDict["weight"]:
         # Generate class weights & One-hot encode labels
@@ -106,12 +115,11 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_
 
         nnModel = model
         metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
-        # if num_labels == 2:
-        #     loss = 'binary_crossentropy'
-        # else:
-        # loss = 'categorical_crossentropy'
+        # learn_rate = hyperparameters["learning_rate"]
+        learn_rate = tf.keras.optimizers.schedules.ExponentialDecay(hyperparameters["learning_rate"], decay_steps=30, decay_rate=0.95, staircase=True)
+
         loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
-        nnModel.compile(optimizer=Adam(learning_rate=hyperparameters["learning_rate"]),
+        nnModel.compile(optimizer=Adam(learning_rate=learn_rate),
                      loss=loss,
                      metrics=metrics)
         nnModel.summary()
@@ -140,11 +148,13 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_
 
     return nnModel, history, scores, y_pred_proba, hyperparameters
 
-def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearning, mlm_pretrain, CSSRS_n_label, boolDict,
-        hyperparameters, n_folds, modelType, max_length, datasets, mask_strat):
+def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, transferLearning, mainTask, CSSRS_n_label,
+        boolDict, hyperparameters, n_folds, modelType, max_length, datasets, mask_strat, few_shot):
 
     ##-----MLM Pre-training-----
     if mlm_pretrain:
+        if not transferLearning:
+            startTime = datetime.now()
         tokenizer, model = getModel(model_name)
 
         split_dataset_name = datasets["pretrain"].split("-")
@@ -184,6 +194,12 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
         test_model_input = {key: torch.stack([i[key][0] for i in task_test["model_input"]]) for key in
                             task_test["model_input"][0]}
 
+        # train_model_input2 = {}
+        # train_model_input2["input_ids"] = train_model_input["input_ids"][:20]
+        # train_model_input2["token_type_ids"] = train_model_input["token_type_ids"][:20]
+        # train_model_input2["attention_mask"] = train_model_input["attention_mask"][:20]
+        # train_model_input2["labels"] = train_model_input["labels"][:20]
+
         trainDataset = customDataset(train_model_input)
         testDataset = customDataset(test_model_input)
 
@@ -198,8 +214,17 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
         # activate training mode
         model.train()
         loader = torch.utils.data.DataLoader(trainDataset, batch_size=mlm_params["batch_size"], shuffle=True)
+
+        mlm_y_loss = {}  # loss history
+        mlm_y_loss['train'] = []
+        mlm_y_loss['val'] = []
+
+        # len(loader) # Number of batches
+        # len(loader.dataset) # Number of samples in dataset
+
         for epoch in range(mlm_params["epochs"]):
             # setup loop with TQDM and dataloader
+            running_loss = 0.0
             loop = tqdm(loader, leave=True)
             for batch in loop:
                 # initialize calculated gradients (from prev step)
@@ -214,10 +239,22 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
                 loop.set_description(f'Epoch {epoch}')
                 loop.set_postfix(loss=loss.item())
 
-        model.save_pretrained(fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
+                running_loss += loss.item() * len(batch['input_ids'])
+
+            epoch_loss = running_loss / len(loader.dataset)
+            mlm_y_loss["train"].append(epoch_loss)
+
+        if not transferLearning:
+            endTime = datetime.now()
+            elapsedTime = endTime - startTime
+
+        if platform.system() == "Windows":
+            model.save_pretrained(fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
+        elif platform.system() == "Linux":
+            model.save_pretrained(fr"UMD_MLM_pretrain_{model_name}")
 
     ##-----Regular modeling-----
-    if transferLearning:
+    if mainTask:
 
         # Models not for sequence classification are run in pytorch
         if modelType != "transformer":
@@ -231,14 +268,16 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
 
         startTime = datetime.now()
         CSSRS = importCSSRS(CSSRS_path, num_labels=CSSRS_n_label)
+        CSSRS = CSSRS
         # Make all text lowercase
-        text = CSSRS["Post"].apply(lambda x: x.lower())
-        labels = CSSRS["Label"]
+        CSSRS["Post"] = CSSRS["Post"].apply(lambda x: x.lower())
+        # text = CSSRS["Post"].apply(lambda x: x.lower())
+        # labels = CSSRS["Label"]
 
         # If spittling entire dataset into train-test split
         if boolDict["split"] == True:
             test_size = 0.25
-            X_train, X_test, y_train, y_test = train_test_split(text, labels, test_size=test_size, shuffle=True,
+            X_train, X_test, y_train, y_test = train_test_split(CSSRS["Post"], CSSRS["Label"], test_size=test_size, shuffle=True,
                                                                 stratify=labels, random_state=split_random_seed)
             X_train = X_train.reset_index(drop=True)
             X_test = X_test.reset_index(drop=True)
@@ -247,7 +286,7 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
 
             df = pd.DataFrame({"Post": list(X_train), "Label": y_train}, columns=['Post', 'Label'])
         else:
-            df = pd.DataFrame({"Post": text, "Label": labels}, columns=['Post', 'Label'])
+            df = pd.DataFrame({"Post": CSSRS["Post"], "Label": CSSRS["Label"]}, columns=['Post', 'Label'])
 
         # Create alias for principal embedding
         # Holdover from previous code. Will remove once I remove all the principal conceptnet embedding code
@@ -261,72 +300,54 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
             fold_hyper = []
             test_size_per_fold = []
 
+            #Initialize dataframe for overall results
             whole_results = pd.DataFrame({"Actual": pd.Series(dtype=int), "Predicted": pd.Series(dtype=int),
                                           "PredictedProba": pd.Series(dtype=int), "Fold": pd.Series(dtype=int)})
             fold_results = []
+
+            # Initalize stratified K-Fold splitting function
             sfk = StratifiedKFold(n_splits=n_folds, shuffle=False)
             fold_num = 1
+
+            # Perform actuall splitting
             for train_indx, test_indx in sfk.split(df["Post"], df["Label"]):
 
+                # Obtain train fold and split into input and labels
                 fold_train = df.iloc[train_indx].copy()
                 fold_train = fold_train.reset_index(drop=True)
+
+                # Implement sampling k from each class for few-shot learning
+                if few_shot["bool"]:
+                    fold_train = fold_train.groupby("Label").sample(n=few_shot["k"], random_state=seed)
+
                 X_train_fold = fold_train["Post"]
                 y_train_fold = fold_train["Label"]
 
+                # Obtain test fold and split into input and labels
                 fold_test = df.iloc[test_indx].copy()
                 fold_test = fold_test.reset_index(drop=True)
                 X_test_fold = fold_test["Post"]
                 y_test_fold = fold_test["Label"]
 
+                # Convert train and test labels to tensors
                 y_train_fold = tf.convert_to_tensor(y_train_fold)
                 y_test_fold = tf.convert_to_tensor(y_test_fold)
+
                 # Generate a print
                 print('------------------------------------------------------------------------')
                 print(f'Training for fold {fold_num} ...')
 
-                model_path = fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}"
-                if model_name == "BERT":
-                    if os.path.exists(model_path):
-                        if modelType == "transformer":
-                            model = TFBertForSequenceClassification.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True,
-                                num_labels=CSSRS_n_label)
-                        else:
-                            model = BertModel.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
-                    else:
-                        print("No transfer learning applied. Loading from huggingface checkpoint.")
-                        model = getRegularModel(model_name, modelType, CSSRS_n_label)
+                if platform.system() == "Windows":
+                    model_path = fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}"
+                elif platform.system() == "Linux":
+                    model_path = fr"UMD_MLM_pretrain_{model_name}"
 
-                elif model_name == "ROBERTA":
-                    if os.path.exists(model_path, modelType):
-                        if modelType == "transformer":
-                            model = TFRobertaForSequenceClassification.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True,
-                                num_labels=CSSRS_n_label)
-                        else:
-                            model = RobertaModel.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
-                    else:
-                        print("No transfer learning applied. Loading from huggingface checkpoint.")
-                        model = getRegularModel(model_name, modelType)
-
-                elif model_name == "ELECTRA":
-                    if os.path.exists(model_path):
-                        if modelType == "transformer":
-                            model = TFElectraForSequenceClassification.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}", from_pt=True,
-                                num_labels=CSSRS_n_label)
-                        else:
-                            model = ElectraModel.from_pretrained(
-                                fr"D:\zProjects\MLM\Saved_Models\UMD_MLM_pretrain_{model_name}")
-                    else:
-                        print("No transfer learning applied. Loading from huggingface checkpoint.")
-                        model = getRegularModel(model_name, modelType)
-
+                # Get Model and Tokenizer
+                model = getMainTaskModel(model_name=model_name, model_path=model_path, modelType=modelType,
+                                         transferLearning=transferLearning, CSSRS_n_label=CSSRS_n_label)
                 tokenizer = getTokenizer(model_name)
 
-
+                # Run fold
                 nnModel, history, scores, \
                 y_pred_proba, hyperparameters = runFold(outputPath=outputPath, filespath=CSSRS_path,
                                                         model=model, tokenizer=tokenizer,
@@ -337,7 +358,7 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
                                                         fold_num=fold_num, datasets=datasets, mask_strat=mask_strat,
                                                         X_train_fold=X_train_fold, y_train_fold=y_train_fold,
                                                         X_test_fold=X_test_fold, y_test_fold=y_test_fold,
-                                                        boolDict=boolDict)
+                                                        boolDict=boolDict, few_shot=few_shot)
 
                 train_auc = history.history['auc']
                 val_auc = history.history['val_auc']
@@ -361,7 +382,6 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
 
                 list_probs = list(map(softmax, y_pred_proba.logits))
                 list_probs = [l.tolist() for l in list_probs]
-                # print(y_pred_proba.logits.map(lambda x: softmax()))
                 y_pred = np.argmax(list_probs, axis=1)
 
                 whole_results = pd.concat(
@@ -401,13 +421,8 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
             # whole_results.to_csv(os.path.join(outputPath, "Actual_vs_Predicted.csv"), index=False)
             endTime = datetime.now()
             elapsedTime = endTime - startTime
+            outputFileName = f"OverallResults {CSSRS_n_label}Label.csv"
 
-            printOverallResults(outputPath=outputPath, fileName=f"OverallResults {CSSRS_n_label}Label.csv",
-                                n_label=CSSRS_n_label, max_length=max_length, boolDict=boolDict,
-                                numCV=n_folds, model_type=modelType, stats=overallResults, pretrain_bool = mlm_pretrain,
-                                hyperparameters=fold_hyper, execTime=elapsedTime, whole_results=whole_results,
-                                fold_results=fold_results, model_name=model_name, datasets=datasets, mask_strat=mask_strat,
-                                mlm_params=mlm_params)
         else:
             # pass
             # y_train = tf.convert_to_tensor(y_train)
@@ -423,7 +438,7 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
                                                                                   datasets=datasets, mask_strat=mask_strat,
                                                                                   X_train_fold=X_train, y_train_fold=y_train,
                                                                                   X_test_fold=X_test, y_test_fold=y_test,
-                                                                                  boolDict=boolDict)
+                                                                                  boolDict=boolDict, few_shot=few_shot)
 
             list_probs = list(map(softmax, y_pred_proba.logits))
             list_probs = [l.tolist() for l in list_probs]
@@ -439,11 +454,25 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, transferLearni
             endTime = datetime.now()
             elapsedTime = endTime - startTime
 
-            printOverallResults(outputPath=outputPath, fileName=f"OverallResults {CSSRS_n_label}Label (no CV).csv",
-                                n_label=CSSRS_n_label, max_length=max_length, boolDict=boolDict,
-                                numCV=n_folds, model_type=modelType, stats=overallResults, pretrain_bool=mlm_pretrain,
-                                hyperparameters=hyperparameters,execTime=elapsedTime, whole_results=whole_results,
-                                fold_results=fold_results, model_name=model_name, mlm_params=mlm_params)
+            outputFileName = f"OverallResults {CSSRS_n_label}Label (no CV).csv"
+
+    if not mlm_pretrain:
+        mlm_y_loss = {}
+
+    # If only doing MLM pre-training and not running main task
+    if mlm_pretrain == True and mainTask == False:
+        new_output_path = os.path.join(outputPath, "[MLM Loss]")
+        if not os.path.exists(new_output_path):
+            os.mkdir(new_output_path)
+        printMLMResults(outputPath=new_output_path, model_name=model_name, mask_strat=mask_strat, mlm_y_loss=mlm_y_loss,
+                        mlm_params=mlm_params)
+    else:
+        printOverallResults(outputPath=outputPath, fileName=outputFileName, mainTaskBool=mainTask,
+                            n_label=CSSRS_n_label, max_length=max_length, boolDict=boolDict,
+                            numCV=n_folds, model_type=modelType, stats=overallResults, pretrain_bool=mlm_pretrain,
+                            hyperparameters=fold_hyper, execTime=elapsedTime, whole_results=whole_results,
+                            fold_results=fold_results, model_name=model_name, datasets=datasets, mask_strat=mask_strat,
+                            mlm_params=mlm_params, transferLearning=transferLearning, mlm_y_loss=mlm_y_loss, few_shot=few_shot)
 
 def main():
     if platform.system() == "Windows":
@@ -471,8 +500,12 @@ def main():
     # mlm_pretrain = True
     mlm_pretrain = False
 
-    transferLearn = True
-    # transferLearn = False
+    # transferLearn = True
+    transferLearn = False
+
+    mainTask = True
+    # mainTask = False
+
 
     pretrain_datset = "UMD-crowd-A"
     # pretrain_datset = "UMD-expert"
@@ -482,10 +515,13 @@ def main():
     masking_strategy = "random"
     # masking_strategy = "entity"
 
+    few_shot = {"bool":True,
+                "k":1}
+
 
     CSSRS_n_labels = 4
     number_of_folds = 5
-    max_length = 100
+    max_length = 512
 
     mlm_params = {"epochs":10, "batch_size":16, "learning_rate":1e-5}
 
@@ -499,25 +535,19 @@ def main():
     if parameter_tune == True:
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
                       "batch_size": hp.choice("batch_size", [4, 24, 32]),
-                      "dropout": hp.choice("droupout", [0.1, 0.2, 0.3, 0.4, 0.5]),
-                      "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001]),
-                      "rnn_nodes": hp.choice("rnn_nodes", [128, 256])}
+                      "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001])}
     else:                                        #Default Values
         param_grid = {"batch_size": 32,          #32, 4 for original CNN
-                      "dropout": 0.25,           #0.25 for RNN, 0.3 for CNN
                       "epochs": 10,              #10, 50 for original CNN
-                      "learning_rate":0.0001,     #0.001
-                      "rnn_nodes":128,           #128
-                      "1st_dense":300,           #300
-                      "2nd_dense":100}           #100
+                      "learning_rate":0.0001}     #0.001
 
     boolDict = {"split":splitBool, "CV":CVBool, "KI":know_infuse,
                 "SMOTE":SMOTE_bool, "weight":weight_bool, "tuning":parameter_tune}
 
     #embed_dimen holdover from previous code. Will eventually remove after cleaning up old references
     run(outputPath=outputPath,UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
-        mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, CSSRS_n_label=CSSRS_n_labels, boolDict=boolDict, hyperparameters=param_grid,
-        n_folds= number_of_folds, modelType=modType, max_length=max_length, datasets=datasets, mask_strat=masking_strategy)
+        mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, mainTask=mainTask, CSSRS_n_label=CSSRS_n_labels, boolDict=boolDict, hyperparameters=param_grid,
+        n_folds= number_of_folds, modelType=modType, max_length=max_length, datasets=datasets, mask_strat=masking_strategy, few_shot=few_shot)
 
 
 global_max_evals = 30

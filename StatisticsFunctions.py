@@ -44,9 +44,6 @@ def getStatistics(outputPath, y_test, y_pred_proba, y_pred, n_lab):
 
     label_accuracies = multiclass_accuracy(matrix, n_lab)
     class_auc = multiclass_ROC_AUC(y_test, y_pred_proba, n_lab)
-    print(y_test)
-    print("------------------------------------------")
-    print(y_pred_proba)
     aucValue = roc_auc_score(y_test, y_pred_proba, multi_class="ovr", average='macro')
 
     new_fp = (sum(y_pred > y_test.to_numpy())) / len(y_pred)

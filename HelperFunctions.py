@@ -40,9 +40,22 @@ def onehotEncode(labels):
     new_labels = convert_to_tensor(onehot_encoded)
     return new_labels
 
+def printMLMResults(outputPath, model_name, mask_strat, mlm_y_loss, mlm_params):
+    # MLM training loss
+    fig = plt.figure(figsize=(15, 15))
+    ax1 = fig.add_subplot(111)
+    ax1.plot(range(1, mlm_params["epochs"] + 1), mlm_y_loss["train"], color='red', marker='o',
+             linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['acc_v'], legend='brief', label="accuracy")
+    plt.xticks(range(1, mlm_params["epochs"] + 1))
+    ax1.set_title(f'MLM training loss per epoch')  # , y=1.05, size=15)
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("Loss")
+    ax1.legend(['train_loss'])
+    fig.savefig(os.path.join(outputPath, f"[{model_name} with {mask_strat} masking] MLM training loss per epoch.png"))
+
 def printOverallResults(outputPath, fileName, n_label, model_name, max_length, boolDict, numCV, model_type,
                         stats, hyperparameters, execTime, whole_results, fold_results, datasets, mask_strat, pretrain_bool,
-                        mlm_params):
+                        mlm_params, mlm_y_loss, transferLearning, mainTaskBool, few_shot):
     """
     :param outputPath:
         path to folder to save all files
@@ -94,39 +107,75 @@ def printOverallResults(outputPath, fileName, n_label, model_name, max_length, b
     else:
         weighting = "None"
 
-    if pretrain_bool:
+    if transferLearning:
         pretrain_str = "Transfer"
         mask_str = mask_strat
-        transf_data = datasets["pretrain"]
+        pretrain_data = datasets["pretrain"]
         transf_params = str(mlm_params)
     else:
         pretrain_str = "Base"
         mask_str = ""
-        transf_data = ""
+        pretrain_data = ""
         transf_params = ""
+
+    if mainTaskBool:
+        task_data = datasets["task"]
+        macro_avg = stats["accuracy"]
+        precision = stats["macro avg"]["precision"]
+        recall = stats["macro avg"]["recall"]
+        flScore = stats["macro avg"]["f1-score"]
+        AUC = stats["auc"]
+        nfp = stats["graded_fp"]
+        nfn = stats["graded_fn"]
+        ord_err = stats["ordinal_err"]
+    else:
+        task_data = ""
+        macro_avg = ""
+        precision = ""
+        recall = ""
+        flScore = ""
+        AUC = ""
+        nfp = ""
+        nfn = ""
+        ord_err = ""
+
+    if few_shot["bool"]:
+        few_shot_k = few_shot["k"]
+    else:
+        few_shot_k = ""
 
     hours, minutes, seconds = str(execTime).split(":")
     results = pd.DataFrame({"Number of labels":n_label, "Dynamic Model":model_name,"Pre-training":pretrain_str,
-                            "Transfer Dataset":transf_data, "Masking":mask_str, "Transfer Hyperparameters":transf_params,
-                            "Task Dataset":datasets["task"],"Max Sentence Length":max_length,
+                            "Transfer Dataset":pretrain_data, "Masking":mask_str, "Transfer Hyperparameters":transf_params,
+                            "Task Dataset":task_data,"Max Sentence Length":max_length,
                             "Model":model_type, "Weighting":weighting,
-                            "Parameter Tuning":boolDict["tuning"] ,"CV Folds":numCV,
-                            "Macro Average":stats["accuracy"],"Precision":stats["macro avg"]["precision"],
-                            "Recall":stats["macro avg"]["recall"],"F1-score":stats["macro avg"]["f1-score"],
-                            "AUC":stats["auc"], "New False Positive Rate":stats["graded_fp"],
-                            "New False Negative Rate":stats["graded_fn"], "Ordinal Error":stats["ordinal_err"],
+                            "Parameter Tuning":boolDict["tuning"], "Few-Shot Learning":few_shot["bool"], "K":few_shot_k,
+                            "CV Folds":numCV, "Macro Average":macro_avg,"Precision":precision,
+                            "Recall":recall,"F1-score":flScore,
+                            "AUC":AUC, "New False Positive Rate":nfp,
+                            "New False Negative Rate":nfn, "Ordinal Error":ord_err,
                             "Execution Time":f"{hours}H{minutes}M", "random.seed":seed, "np seed":seed, "tf seed":seed,
                             "train_test split seed":split_random_seed, "SMOTE seed":SMOTE_random_seed,
-                            "KFold seed":KFold_shuffle_random_seed}, index=[0])
-    for i in range(n_label):
-        results[f"Label {i} Accuracy"]  = stats[str(i)]["acc"]
+                            "KFold seed":KFold_shuffle_random_seed,"Notes":""}, index=[0])
 
-    if boolDict["split"]:
-        print(hyperparameters)
-        results[f"Hyperparameters"] = str(sorted(list(hyperparameters.items()), key=lambda x: x[0][0]))
+    if mainTaskBool:
+        for i in range(n_label):
+            results[f"Label {i} Accuracy"] = stats[str(i)]["acc"]
+
+        if boolDict["split"]:
+            results[f"Hyperparameters"] = str(sorted(list(hyperparameters.items()), key=lambda x: x[0][0]))
+        else:
+            for i in range(numCV):
+                results[f"Fold {i+1} Hyperparameters"] = str(sorted(list(hyperparameters[i].items()), key=lambda x: x[0][0]))
     else:
-        for i in range(numCV):
-            results[f"Fold {i+1} Hyperparameters"] = str(sorted(list(hyperparameters[i].items()), key=lambda x: x[0][0]))
+        for i in range(n_label):
+            results[f"Label {i} Accuracy"] = ""
+
+        if boolDict["split"]:
+            results[f"Hyperparameters"] = ""
+        else:
+            for i in range(numCV):
+                results[f"Fold {i+1} Hyperparameters"] = ""
 
     file_path = os.path.join(outputPath, fileName)
 
@@ -142,96 +191,111 @@ def printOverallResults(outputPath, fileName, n_label, model_name, max_length, b
             if n_label == 4:
                 results = results[["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset",
                                    "Masking", "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
-                                   "Weighting", "Parameter Tuning", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy","Label 2 Accuracy","Label 3 Accuracy",
+                                   "Weighting", "Parameter Tuning", "Few-Shot Learning", "K", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy","Label 2 Accuracy","Label 3 Accuracy",
                                    "Macro Average","Precision", "Recall","F1-score", "AUC", "New False Positive Rate","New False Negative Rate",
                                "Ordinal Error", "Fold 1 Hyperparameters", "Fold 2 Hyperparameters", "Fold 3 Hyperparameters",
                                    "Fold 4 Hyperparameters","Fold 5 Hyperparameters", "Execution Time", "random.seed", "np seed",
-                                   "tf seed", "train_test split seed", "SMOTE seed", "KFold seed"]]
+                                   "tf seed", "train_test split seed", "SMOTE seed", "KFold seed", "Notes"]]
             elif n_label == 5:
                 results = results[["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset",
                                    "Masking", "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
-                                   "Weighting", "Parameter Tuning", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy", "Label 3 Accuracy",
+                                   "Weighting", "Parameter Tuning", "Few-Shot Learning", "K", "CV Folds","Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy", "Label 3 Accuracy",
                                    "Label 4 Accuracy","Macro Average", "Precision", "Recall", "F1-score", "AUC", "New False Positive Rate",
                                "New False Negative Rate", "Ordinal Error", "Fold 1 Hyperparameters", "Fold 2 Hyperparameters",
                                    "Fold 3 Hyperparameters","Fold 4 Hyperparameters","Fold 5 Hyperparameters", "Execution Time",
-                                   "random.seed", "np seed", "tf seed", "train_test split seed", "SMOTE seed", "KFold seed"]]
+                                   "random.seed", "np seed", "tf seed", "train_test split seed", "SMOTE seed", "KFold seed", "Notes"]]
     elif boolDict["split"]:
         if n_label == 4:
             results = results[
                 ["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset","Masking",
                  "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
-                 "Weighting", "Parameter Tuning", "CV Folds", "Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy",
+                 "Weighting", "Parameter Tuning", "Few-Shot Learning", "K", "CV Folds", "Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy",
                  "Label 3 Accuracy","Macro Average", "Precision", "Recall", "F1-score", "AUC", "New False Positive Rate",
                  "New False Negative Rate","Ordinal Error", "Hyperparameters", "Execution Time", "random.seed", "np seed",
-                 "tf seed", "train_test split seed", "SMOTE seed", "KFold seed"]]
+                 "tf seed", "train_test split seed", "SMOTE seed", "KFold seed", "Notes"]]
         elif n_label == 5:
             results = results[
                 ["QID", "Number of labels", "Dynamic Model", "Pre-training", "Transfer Dataset","Masking",
                  "Transfer Hyperparameters", "Task Dataset","Max Sentence Length", "Model",
-                 "Weighting", "Parameter Tuning", "CV Folds", "Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy",
+                 "Weighting", "Parameter Tuning", "Few-Shot Learning", "K", "CV Folds", "Label 0 Accuracy", "Label 1 Accuracy", "Label 2 Accuracy",
                  "Label 3 Accuracy","Label 4 Accuracy", "Macro Average", "Precision", "Recall", "F1-score", "AUC",
                  "New False Positive Rate",
                  "New False Negative Rate", "Ordinal Error", "Hyperparameters", "Execution Time",
-                 "random.seed", "np seed", "tf seed", "train_test split seed", "SMOTE seed", "KFold seed"]]
+                 "random.seed", "np seed", "tf seed", "train_test split seed", "SMOTE seed", "KFold seed", "Notes"]]
 
     file_path = os.path.join(outputPath, fileName)
     results.to_csv(file_path, mode="a", index=False, header = not os.path.exists(file_path))
 
 
-    if boolDict["split"]:
-        actual_vs_pred = f"[{qid}] (No CV) {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
-                           f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, Actual_vs_Predicted"
-        conf_matrix_name = f"[{qid}] (No CV) {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
-                           f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, Confusion Matrix"
-    else:
-        actual_vs_pred = f"[{qid}] {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
-                           f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, {numCV} Folds, Actual_vs_Predicted"
-        conf_matrix_name = f"[{qid}] {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
-                           f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, {numCV} Folds, Confusion Matrix"
-    folder = os.listdir(outputPath)
+    if mainTaskBool:
+        if boolDict["split"]:
+            actual_vs_pred = f"[{qid}] (No CV) {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
+                               f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, Actual_vs_Predicted"
+            conf_matrix_name = f"[{qid}] (No CV) {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
+                               f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, Confusion Matrix"
+        else:
+            actual_vs_pred = f"[{qid}] {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
+                               f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, {numCV} Folds, Actual_vs_Predicted"
+            conf_matrix_name = f"[{qid}] {model_name}, Max length of {max_length},{' No' if boolDict['SMOTE'] == False else ''} SMOTE, {model_type}, " \
+                               f"{'No' if boolDict['KI'] == False else 'with'} Knowledge Infusion, {numCV} Folds, Confusion Matrix"
+        folder = os.listdir(outputPath)
 
-    #Check if file with same name exists
-    #If so, add the appropriate number at the end to designate different results using same parameters
-    file_count = 0
-    for file in folder:
-        if conf_matrix_name in file:
-            file_count = file_count + 1
+        #Check if file with same name exists
+        #If so, add the appropriate number at the end to designate different results using same parameters
+        file_count = 0
+        for file in folder:
+            if conf_matrix_name in file:
+                file_count = file_count + 1
 
-    matDF = pd.DataFrame(stats["matrix"], index=[i for i in range(n_label)], columns=[i for i in range(n_label)])
-    ax = sns.heatmap(matDF, annot=True, cmap="Blues", fmt='d').get_figure()
+        matDF = pd.DataFrame(stats["matrix"], index=[i for i in range(n_label)], columns=[i for i in range(n_label)])
+        ax = sns.heatmap(matDF, annot=True, cmap="Blues", fmt='d').get_figure()
 
-    if file_count == 0:
-        ax.savefig(os.path.join(outputPath, conf_matrix_name + f".png"))
-        whole_results.to_csv(os.path.join(outputPath, actual_vs_pred + ".csv"), index=False)
-    else:
-        ax.savefig(os.path.join(outputPath,conf_matrix_name + f" ({file_count}).png"))
-        whole_results.to_csv(os.path.join(outputPath, actual_vs_pred + f" ({file_count}).csv"), index=False)
+        if file_count == 0:
+            ax.savefig(os.path.join(outputPath, conf_matrix_name + f".png"))
+            whole_results.to_csv(os.path.join(outputPath, actual_vs_pred + ".csv"), index=False)
+        else:
+            ax.savefig(os.path.join(outputPath,conf_matrix_name + f" ({file_count}).png"))
+            whole_results.to_csv(os.path.join(outputPath, actual_vs_pred + f" ({file_count}).csv"), index=False)
 
 
-    # Fold training/validation statistics
-    for i in range(len(fold_results)):
+    if pretrain_bool:
+        # MLM training loss
         fig = plt.figure(figsize=(15, 15))
-        ax0 = plt.subplot2grid((3, 1), (0, 0), rowspan=1, colspan=1)
-        ax1 = plt.subplot2grid((3, 1), (1, 0), rowspan=1, colspan=1)
-
-        ax0.plot(fold_results[i]['epochs'], fold_results[i]['train_acc'], color='red', marker='o',
+        ax1 = fig.add_subplot(111)
+        ax1.plot(range(1, mlm_params["epochs"] + 1), mlm_y_loss["train"], color='red', marker='o',
                  linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['acc_v'], legend='brief', label="accuracy")
-        ax0.plot(fold_results[i]['epochs'], fold_results[i]['val_acc'], color='green', marker='o',
-                 linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['val_acc'], legend='brief', label="val_accuracy")
-        ax0.plot(fold_results[i]['epochs'], fold_results[i]['train_loss'], color='black', marker='o',
-                 linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['loss_v'], legend='brief', label="loss")
-        ax0.plot(fold_results[i]['epochs'], fold_results[i]['val_loss'], color='blue', marker='o',
-                 linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['val_loss'], legend='brief', label="val_loss")
-        ax0.set_title(f'Fold {i+1}: Training and validation accuracy/loss')  # , y=1.05, size=15)
-        ax0.legend(['train_acc', 'val_acc', 'train_loss', 'val_loss'])
+        plt.xticks(range(1, mlm_params["epochs"] + 1))
+        ax1.set_title(f'MLM training loss per epoch')  # , y=1.05, size=15)
+        ax1.set_xlabel("Epoch")
+        ax1.set_ylabel("Loss")
+        ax1.legend(['train_loss'])
+        fig.savefig(os.path.join(outputPath, f"[{qid}] MLM training loss per epoch.png"))
 
-        ax1.set_title(f'Fold {i+1}: Training and validation AUC')
-        ax1.plot(fold_results[i]['epochs'], fold_results[i]['train_auc'], color='red', marker='o',
-                 linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['acc_v'], legend='brief', label="accuracy")
-        ax1.plot(fold_results[i]['epochs'], fold_results[i]['val_auc'], color='green', marker='o',
-                 linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['val_acc'], legend='brief', label="val_accuracy")
-        ax1.legend(['train_auc', 'val_auc'])
-        fig.savefig(os.path.join(outputPath, f" [{qid}] Fold  {i+1} - Training and Validation Accuracy, Loss, AUC.png"))
+    if mainTaskBool:
+        # Fold training/validation statistics
+        for i in range(len(fold_results)):
+            fig = plt.figure(figsize=(15, 15))
+            ax0 = plt.subplot2grid((3, 1), (0, 0), rowspan=1, colspan=1)
+            ax1 = plt.subplot2grid((3, 1), (1, 0), rowspan=1, colspan=1)
+
+            ax0.plot(fold_results[i]['epochs'], fold_results[i]['train_acc'], color='red', marker='o',
+                     linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['acc_v'], legend='brief', label="accuracy")
+            ax0.plot(fold_results[i]['epochs'], fold_results[i]['val_acc'], color='green', marker='o',
+                     linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['val_acc'], legend='brief', label="val_accuracy")
+            ax0.plot(fold_results[i]['epochs'], fold_results[i]['train_loss'], color='black', marker='o',
+                     linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['loss_v'], legend='brief', label="loss")
+            ax0.plot(fold_results[i]['epochs'], fold_results[i]['val_loss'], color='blue', marker='o',
+                     linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['val_loss'], legend='brief', label="val_loss")
+            ax0.set_title(f'Fold {i+1}: Training and validation accuracy/loss')  # , y=1.05, size=15)
+            ax0.legend(['train_acc', 'val_acc', 'train_loss', 'val_loss'])
+
+            ax1.set_title(f'Fold {i+1}: Training and validation AUC')
+            ax1.plot(fold_results[i]['epochs'], fold_results[i]['train_auc'], color='red', marker='o',
+                     linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['acc_v'], legend='brief', label="accuracy")
+            ax1.plot(fold_results[i]['epochs'], fold_results[i]['val_auc'], color='green', marker='o',
+                     linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['val_acc'], legend='brief', label="val_accuracy")
+            ax1.legend(['train_auc', 'val_auc'])
+            fig.savefig(os.path.join(outputPath, f" [{qid}] Fold  {i+1} - Train & Val Acc_Loss_AUC.png"))
 
         # plt.tight_layout()
         # plt.show()

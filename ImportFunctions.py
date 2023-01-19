@@ -82,13 +82,17 @@ def getModel(modelType):
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = RobertaForMaskedLM.from_pretrained(model_name)
     elif modelType.upper() == "ELECTRA":
-        model_name = 'google/electra-base-discriminator'
+        if platform.system() == "Windows":
+            model_name = 'google/electra-base-discriminator'
+        elif platform.system() == "Linux":
+            model_name = r'/ddn/home12/r3102/files/electra-base-discriminator'
         tokenizer = AutoTokenizer.from_pretrained(model_name)
         model = ElectraForMaskedLM.from_pretrained(model_name)
 
     return tokenizer, model
 
 def getRegularModel(modelName, modelType, CSSRS_n_label):
+
     if modelName.upper() == "BERT":
         model_name = 'bert-base-uncased'
         if modelType == "transformer":
@@ -102,11 +106,50 @@ def getRegularModel(modelName, modelType, CSSRS_n_label):
         else:
             model = RobertaModel.from_pretrained(model_name)
     elif modelName.upper() == "ELECTRA":
-        model_name = 'google/electra-base-discriminator'
+        if platform.system() == "Windows":
+            model_name = 'google/electra-base-discriminator'
+        elif platform.system() == "Linux":
+            model_name = r"/ddn/home12/r3102/files/electra-base-discriminator"
         if modelType == "transformer":
             model = TFElectraForSequenceClassification.from_pretrained(model_name,num_labels = CSSRS_n_label)
         else:
             model = ElectraModel.from_pretrained(model_name)
+
+    return model
+
+
+def getMainTaskModel(model_name, model_path, modelType, transferLearning, CSSRS_n_label):
+    if transferLearning:  # If applying model trained using MLM pre-training
+        if os.path.exists(model_path):  # If MLM pre-trained model exists for BERT model
+            if model_name == "BERT":
+                if modelType == "transformer":  # If only dropout and output top layers
+                    model = TFBertForSequenceClassification.from_pretrained(model_path, from_pt=True,
+                                                                            num_labels=CSSRS_n_label)
+                else:
+                    model = BertModel.from_pretrained(model_path)
+
+            elif model_name == "ROBERTA":
+                if modelType == "transformer":  # If only dropout and output top layers
+                    model = TFRobertaForSequenceClassification.from_pretrained(model_path, from_pt=True,
+                                                                               num_labels=CSSRS_n_label)
+                else:
+                    model = RobertaModel.from_pretrained(model_path)
+
+            elif model_name == "ELECTRA":
+                if modelType == "transformer":  # If only dropout and output top layers
+                    model = TFElectraForSequenceClassification.from_pretrained(model_path, from_pt=True,
+                                                                               num_labels=CSSRS_n_label)
+                else:
+                    model = ElectraModel.from_pretrained(model_path)
+
+        else:  # If No MLM pre-trained model exists for selected model
+            print(f"No MLM pre-trained model exists for {model_name}. "
+                  f"No transfer learning applied. Loading from huggingface checkpoint.")
+            model = getRegularModel(model_name, modelType, CSSRS_n_label)
+
+    else:
+        print(f"No transfer learning applied. Loading from huggingface checkpoint.")
+        model = getRegularModel(model_name, modelType, CSSRS_n_label)
 
     return model
 
@@ -118,7 +161,10 @@ def getTokenizer(modelType):
         model_name = 'roberta-base'
         tokenizer = AutoTokenizer.from_pretrained(model_name)
     elif modelType.upper() == "ELECTRA":
-        model_name = 'google/electra-base-discriminator'
+        if platform.system() == "Windows":
+            model_name = 'google/electra-base-discriminator'
+        elif platform.system() == "Linux":
+            model_name =  r"/ddn/home12/r3102/files/electra-base-discriminator"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     return tokenizer
