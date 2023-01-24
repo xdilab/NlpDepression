@@ -295,7 +295,7 @@ def printOverallResults(outputPath, fileName, n_label, model_name, max_length, b
             ax1.plot(fold_results[i]['epochs'], fold_results[i]['val_auc'], color='green', marker='o',
                      linestyle='dashed')  # sns.lineplot(ax=ax0,x=final_results['epochs'],y=final_results['val_acc'], legend='brief', label="val_accuracy")
             ax1.legend(['train_auc', 'val_auc'])
-            fig.savefig(os.path.join(outputPath, f" [{qid}] Fold  {i+1} - Train & Val Acc_Loss_AUC.png"))
+            fig.savefig(os.path.join(outputPath, f"[{qid}] Fold  {i+1} - Train & Val Acc_Loss_AUC.png"))
 
         # plt.tight_layout()
         # plt.show()

@@ -3,7 +3,60 @@
 from Libraries import *
 from StatisticsFunctions import multiclass_ROC_AUC
 from EmbeddingFunctions import getTokens
-# Fully Dense Neural Network
+
+class E2ESentenceTransformer(tf.keras.Model):
+    def __init__(self, model_name_or_path, num_labels, **kwargs):
+        super().__init__()
+        # loads the in-graph tokenizer
+        # self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, **kwargs)
+        # loads our TFSentenceTransformer
+        self.model = TFSentenceTransformer(model_name_or_path, from_pt=True)
+        self.dropout = tf.keras.layers.Dropout(0.1)
+        self.classifier = tf.keras.layers.Dense(num_labels, activation="softmax")
+
+    def call(self, inputs):
+        # runs tokenization and creates embedding
+        # tokenized = self.tokenizer(inputs)
+        embeddings = self.model(inputs)
+        dropout_emb = self.dropout(embeddings)
+        return self.classifier(dropout_emb)
+
+
+    # def model(self):
+    #     x = Input(shape=(24, 24, 3))
+    #     return Model(inputs=[x], outputs=self.call(x))
+
+# https://www.philschmid.de/tensorflow-sentence-transformers
+class TFSentenceTransformer(tf.keras.layers.Layer):
+    def __init__(self, model_name_or_path, **kwargs):
+        super(TFSentenceTransformer, self).__init__()
+        # loads transformers model
+        self.model = TFAutoModel.from_pretrained(model_name_or_path, from_pt=True)
+
+    def call(self, inputs, normalize=True):
+        # runs model on inputs
+        model_output = self.model(inputs)
+        # Perform pooling. In this case, mean pooling.
+        embeddings = self.mean_pooling(model_output, inputs["attention_mask"])
+        # normalizes the embeddings if wanted
+        if normalize:
+          embeddings = self.normalize(embeddings)
+
+        embeddings = embeddings
+
+        return embeddings
+
+    def mean_pooling(self, model_output, attention_mask):
+        token_embeddings = model_output[0] # First element of model_output contains all token embeddings
+        input_mask_expanded = tf.cast(
+            tf.broadcast_to(tf.expand_dims(attention_mask, -1), tf.shape(token_embeddings)),
+            tf.float32
+        )
+        return tf.math.reduce_sum(token_embeddings * input_mask_expanded, axis=1) / tf.clip_by_value(tf.math.reduce_sum(input_mask_expanded, axis=1), 1e-9, tf.float32.max)
+
+    def normalize(self, embeddings):
+      embeddings, _ = tf.linalg.normalize(embeddings, 2, axis=1)
+      return embeddings
 
 # Fully Dense Neural Network
 def denseNN(param_grid, Xtrain, ytrain, X_test, y_test, num_labels):

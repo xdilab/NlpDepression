@@ -2,6 +2,7 @@
 
 from Libraries import *
 from HelperFunctions import getLabels, extractList
+from ModelFunctions import TFSentenceTransformer, E2ESentenceTransformer
 
 def importUMD(UMD_path, anno_type, task_type=None):
     chunksize = 10 ** 6
@@ -93,6 +94,7 @@ def getModel(modelType):
 
 def getRegularModel(modelName, modelType, CSSRS_n_label):
 
+
     if modelName.upper() == "BERT":
         model_name = 'bert-base-uncased'
         if modelType == "transformer":
@@ -115,10 +117,24 @@ def getRegularModel(modelName, modelType, CSSRS_n_label):
         else:
             model = ElectraModel.from_pretrained(model_name)
 
+    elif modelName.upper() == "SBERT":
+        if platform.system() == "Windows":
+            model_name = 'sentence-transformers/all-mpnet-base-v2'
+        elif platform.system() == "Linux":
+            model_name = r"/ddn/home12/r3102/files/all-mpnet-base-v2"
+
+        model = E2ESentenceTransformer(model_name, CSSRS_n_label)
+        # model = TFSentenceTransformer(model_name)
+        # model = SentenceTransformer(model_name)
     return model
 
 
 def getMainTaskModel(model_name, model_path, modelType, transferLearning, CSSRS_n_label):
+
+    if model_name == "sBERT":
+        model = getRegularModel(model_name, modelType, CSSRS_n_label)
+        return model
+
     if transferLearning:  # If applying model trained using MLM pre-training
         if os.path.exists(model_path):  # If MLM pre-trained model exists for BERT model
             if model_name == "BERT":
@@ -165,6 +181,12 @@ def getTokenizer(modelType):
             model_name = 'google/electra-base-discriminator'
         elif platform.system() == "Linux":
             model_name =  r"/ddn/home12/r3102/files/electra-base-discriminator"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    elif modelType.upper() == "SBERT":
+        if platform.system() == "Windows":
+            model_name = 'sentence-transformers/all-mpnet-base-v2'
+        elif platform.system() == "Linux":
+            model_name = r"/ddn/home12/r3102/files/all-mpnet-base-v2"
         tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     return tokenizer
