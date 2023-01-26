@@ -300,33 +300,44 @@ def printOverallResults(outputPath, fileName, n_label, model_name, max_length, b
         # plt.tight_layout()
         # plt.show()
 
-def getLabels(df, num_labels):
-    scale_conversion4 = {"Supportive": "No-risk",
-                         "Indicator": "No-risk",
-                         "Ideation": "Ideation",
-                         "Behavior": "Behavior",
-                         "Attempt": "Attempt"}
+def getLabels(df, num_labels, dataset):
+    if dataset == "CSSRS":
 
-    label_conversion = {"Supportive": 0,
-                        "Indicator": 1,
-                        "Ideation": 2,
-                        "Behavior": 3,
-                        "Attempt": 4}
+        scale_conversion4 = {"Supportive": "No-risk",
+                             "Indicator": "No-risk",
+                             "Ideation": "Ideation",
+                             "Behavior": "Behavior",
+                             "Attempt": "Attempt"}
 
-    label_conversion4 = {"No-risk": 0,
-                         "Ideation": 1,
-                         "Behavior": 2,
-                         "Attempt": 3}
+        label_conversion = {"Supportive": 0,
+                            "Indicator": 1,
+                            "Ideation": 2,
+                            "Behavior": 3,
+                            "Attempt": 4}
 
-    if num_labels == 5:
+        label_conversion4 = {"No-risk": 0,
+                             "Ideation": 1,
+                             "Behavior": 2,
+                             "Attempt": 3}
+
+        if num_labels == 5:
+            df = df.replace({"Label": label_conversion})
+            inv_map = {val: key for key, val in label_conversion.items()}
+            return (df, inv_map)
+        elif num_labels == 4:
+            df = df.replace({"Label": scale_conversion4})
+            df = df.replace({"Label": label_conversion4})
+            inv_map = {val: key for key, val in label_conversion4.items()}
+            return (df, inv_map)
+    elif dataset == "UMD":
+        label_conversion = {"a": 0,
+                            "b": 1,
+                            "c": 2,
+                            "d": 3}
+
         df = df.replace({"Label": label_conversion})
         inv_map = {val: key for key, val in label_conversion.items()}
         return (df, inv_map)
-    elif num_labels == 4:
-        df = df.replace({"Label": scale_conversion4})
-        df = df.replace({"Label": label_conversion4})
-        inv_map = {val: key for key, val in label_conversion4.items()}
-        return(df, inv_map)
 
 def printPredictions(y_test, y_pred, n_lab, outputPath):
     if n_lab == 4:

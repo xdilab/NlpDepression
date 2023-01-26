@@ -65,7 +65,7 @@ def importUMD(UMD_path, anno_type, task_type=None):
 
 def importCSSRS(filepath, num_labels=4):
     CSSRS = pd.read_csv(filepath)
-    CSSRS, inv_map = getLabels(CSSRS, num_labels)
+    CSSRS, inv_map = getLabels(CSSRS, num_labels, "CSSRS")
     # Extract List from string
     extractList(CSSRS)
     # Concatenate Posts into one long string
@@ -128,6 +128,51 @@ def getRegularModel(modelName, modelType, CSSRS_n_label):
         # model = SentenceTransformer(model_name)
     return model
 
+def getMultiTaskModel(model_name, model_path, modelType, transferLearning, CSSRS_n_label):
+    if model_name == "sBERT":
+        model = getRegularModel(model_name, modelType, CSSRS_n_label)
+        return model
+
+    if transferLearning:  # If applying model trained using MLM pre-training
+        if os.path.exists(model_path):  # If MLM pre-trained model exists for BERT model
+            if model_name == "BERT":
+                if modelType == "transformer":  # If only dropout and output top layers
+                    model = TFBertModel.from_pretrained(model_path)
+
+            elif model_name == "ROBERTA":
+                if modelType == "transformer":  # If only dropout and output top layers
+                    model = TFRobertaModel.from_pretrained(model_path)
+
+            elif model_name == "ELECTRA":
+                if modelType == "transformer":  # If only dropout and output top layers
+                    model = TFElectraModel.from_pretrained(model_path)
+
+        else:  # If No MLM pre-trained model exists for selected model
+            print(f"No MLM pre-trained model exists for {model_name}. "
+                  f"No transfer learning applied. Loading from huggingface checkpoint.")
+            model = getRegularModel(model_name, modelType, CSSRS_n_label)
+
+    else:
+        print(f"No transfer learning applied. Loading from huggingface checkpoint.")
+        if model_name == "BERT":
+            model_name = 'bert-base-uncased'
+            if modelType == "transformer":  # If only dropout and output top layers
+                model = TFBertModel.from_pretrained(model_name)
+
+        elif model_name == "ROBERTA":
+            model_name = 'roberta-base'
+            if modelType == "transformer":  # If only dropout and output top layers
+                model = TFRobertaModel.from_pretrained(model_name)
+
+        elif model_name == "ELECTRA":
+            if platform.system() == "Windows":
+                model_name = 'google/electra-base-discriminator'
+            elif platform.system() == "Linux":
+                model_name = r"/ddn/home12/r3102/files/electra-base-discriminator"
+            if modelType == "transformer":  # If only dropout and output top layers
+                model = TFElectraModel.from_pretrained(model_name)
+
+    return model
 
 def getMainTaskModel(model_name, model_path, modelType, transferLearning, CSSRS_n_label):
 

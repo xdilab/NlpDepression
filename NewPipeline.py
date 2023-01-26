@@ -7,6 +7,7 @@ from HelperFunctions import getLabels, extractList,getXfromBestModelfromTrials, 
 from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
 from StatisticsFunctions import getStatistics, getSummStats, softmax
 from ImportFunctions import importUMD, importCSSRS, getModel, getTokenizer, getRegularModel, getMainTaskModel
+from MultiTaskFiles import MultiTaskrun
 
 def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_length, num_labels,
             boolDict, hyperparameters, n_folds, fold_num, datasets, mask_strat, X_train_fold, y_train_fold,
@@ -309,17 +310,39 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
         print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
 
         startTime = datetime.now()
-        CSSRS = importCSSRS(CSSRS_path, num_labels=CSSRS_n_label)
-        CSSRS = CSSRS
-        # Make all text lowercase
-        CSSRS["Post"] = CSSRS["Post"].apply(lambda x: x.lower())
+
+        # if boolDict["MultiTask"]: # If Multi-tasking
+
+        split_main_task_dataset_name = datasets["task"].split("-")
+        if split_main_task_dataset_name[0] == "CSSRS":
+            main_df = importCSSRS(CSSRS_path, num_labels=CSSRS_n_label)
+            # Make all text lowercase
+            main_df["Post"] = main_df["Post"].apply(lambda x: x.lower())
+
+        elif split_main_task_dataset_name[0] == "UMD":
+            if split_main_task_dataset_name[1] == "crowd":
+                task_train, task_test = importUMD(UMD_path, split_main_task_dataset_name[1], split_main_task_dataset_name[2])
+            elif split_main_task_dataset_name[1] == "expert":
+                task_train, task_test = importUMD(UMD_path, split_main_task_dataset_name[1])
+
+            # For now, remove all posts with empty post_body (i.e. just post title)
+            task_train = task_train[task_train["post_body"].notnull()]  # Removes 72 posts (task-train-A)
+            task_test = task_test[task_test["post_body"].notnull()]  # Removes 5 posts (task-train-A)
+            task_train = task_train.rename({"post_body":"Post", "label":"Label"}, axis=1)
+            task_test = task_test.rename({"post_body":"Post", "raw_label":"Label"}, axis=1)
+            main_df = pd.concat([task_train, task_test], ignore_index=True)
+            main_df,_ = getLabels(main_df, 4, "UMD")
+        else:
+            print("Incorrect input for pretrain dataset. Exiting...")
+            exit(1)
+
         # text = CSSRS["Post"].apply(lambda x: x.lower())
         # labels = CSSRS["Label"]
 
         # If spittling entire dataset into train-test split
-        if boolDict["split"] == True:
+        if boolDict["split"] == True and split_main_task_dataset_name[0] == "CSSRS":
             test_size = 0.25
-            X_train, X_test, y_train, y_test = train_test_split(CSSRS["Post"], CSSRS["Label"], test_size=test_size, shuffle=True,
+            X_train, X_test, y_train, y_test = train_test_split(main_df["Post"], main_df["Label"], test_size=test_size, shuffle=True,
                                                                 stratify=labels, random_state=split_random_seed)
             X_train = X_train.reset_index(drop=True)
             X_test = X_test.reset_index(drop=True)
@@ -328,7 +351,12 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
 
             df = pd.DataFrame({"Post": list(X_train), "Label": y_train}, columns=['Post', 'Label'])
         else:
-            df = pd.DataFrame({"Post": CSSRS["Post"], "Label": CSSRS["Label"]}, columns=['Post', 'Label'])
+            # Keep these seperated for now as still have not completely decided on how to split up presplit train/test
+            # For now, they are just combined for CV
+            if split_main_task_dataset_name[0] == "CSSRS":
+                df = pd.DataFrame({"Post": main_df["Post"], "Label": main_df["Label"]}, columns=['Post', 'Label'])
+            elif split_main_task_dataset_name[0] == "UMD":
+                df = pd.DataFrame({"Post": main_df["Post"], "Label": main_df["Label"]}, columns=['Post', 'Label'])
 
         # Create alias for principal embedding
         # Holdover from previous code. Will remove once I remove all the principal conceptnet embedding code
@@ -350,6 +378,9 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
             # Initalize stratified K-Fold splitting function
             sfk = StratifiedKFold(n_splits=n_folds, shuffle=False)
             fold_num = 1
+
+            if split_main_task_dataset_name[0] == "UMD":
+                df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
 
             # Perform actuall splitting
             for train_indx, test_indx in sfk.split(df["Post"], df["Label"]):
@@ -383,6 +414,9 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
                 fold_test = fold_test.reset_index(drop=True)
                 X_test_fold = fold_test["Post"]
                 y_test_fold = fold_test["Label"]
+
+                # print(y_train_fold.value_counts())
+                # print(y_test_fold.value_counts())
 
                 # Convert train and test labels to tensors
                 # if model_name.upper() != "SBERT":
@@ -421,8 +455,6 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
                                                         X_val_fold=X_val_fold, y_val_fold=y_val_fold,
                                                         X_test_fold=X_test_fold, y_test_fold=y_test_fold,
                                                         boolDict=boolDict, few_shot=few_shot)
-
-
 
                 train_auc = history.history['auc']
                 val_auc = history.history['val_auc']
@@ -555,10 +587,10 @@ def main():
         CSSRS_path = r"/ddn/home12/r3102/datasets/500_Reddit_users_posts_labels.csv"
 
     # All models currently implemented are the base uncased versions
-    # model_name = "BERT"
+    model_name = "BERT"
     # model_name = "ROBERTA"
     # model_name = "ELECTRA"
-    model_name = "sBERT"
+    # model_name = "sBERT"
 
     # modType = "CNN"
     # modType = "GRU"
@@ -577,15 +609,15 @@ def main():
 
     pretrain_datset = "UMD-crowd-A"
     # pretrain_datset = "UMD-expert"
-    task_dataset = "CSSRS"
-    datasets = {"pretrain":pretrain_datset, "task":task_dataset}
+    # task_dataset = "CSSRS"
+    task_dataset = "UMD-crowd-A"
+    datasets = {"pretrain":pretrain_datset, "task":task_dataset, "multitask":["CSSRS", "UMD-crowd-A"]}
 
     masking_strategy = "random"
     # masking_strategy = "entity"
 
-    few_shot = {"bool":True,
+    few_shot = {"bool":False,
                 "k":1}
-
 
     CSSRS_n_labels = 4
     number_of_folds = 5
@@ -598,6 +630,7 @@ def main():
     know_infuse = False
     SMOTE_bool = False
     weight_bool = False
+    multiTask_bool = True
 
     parameter_tune = False
     if parameter_tune == True:
@@ -610,24 +643,31 @@ def main():
                       "learning_rate":0.0001}     #0.001
 
     boolDict = {"split":splitBool, "CV":CVBool, "KI":know_infuse,
-                "SMOTE":SMOTE_bool, "weight":weight_bool, "tuning":parameter_tune}
+                "SMOTE":SMOTE_bool, "weight":weight_bool, "tuning":parameter_tune,
+                "MultiTask":multiTask_bool}
 
-    outputPath = os.path.join(outputPath, "01_23_23")
+    outputPath = os.path.join(outputPath, "01_25_23")
     if not os.path.exists(outputPath):
         os.mkdir(outputPath)
     #
-    # run(outputPath=outputPath, UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
-    #                     mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, mainTask=mainTask, CSSRS_n_label=CSSRS_n_labels, boolDict=boolDict, hyperparameters=param_grid,
-    #                     n_folds= number_of_folds, modelType=modType, max_length=max_length, datasets=datasets, mask_strat=masking_strategy, few_shot=few_shot)
+    if boolDict["MultiTask"]:
+        MultiTaskrun(outputPath=outputPath, UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
+            mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, mainTask=mainTask, CSSRS_n_label=CSSRS_n_labels,
+            boolDict=boolDict, hyperparameters=param_grid, n_folds=number_of_folds, modelType=modType, max_length=max_length, datasets=datasets,
+            mask_strat=masking_strategy, few_shot=few_shot)
+    else:
+        run(outputPath=outputPath, UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
+                        mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, mainTask=mainTask, CSSRS_n_label=CSSRS_n_labels, boolDict=boolDict, hyperparameters=param_grid,
+                        n_folds= number_of_folds, modelType=modType, max_length=max_length, datasets=datasets, mask_strat=masking_strategy, few_shot=few_shot)
 
-    for k_val in [1, 5, 10, 15, 20, 25, 30, 35]:
-        few_shot["k"] = k_val
-        for lr_val in [0.001, 0.005, 0.0001, 0.0005, 0.00001, 0.00005]:
-            param_grid["learning_rate"] = lr_val
-
-            run(outputPath=outputPath, UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
-                    mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, mainTask=mainTask, CSSRS_n_label=CSSRS_n_labels, boolDict=boolDict, hyperparameters=param_grid,
-                    n_folds= number_of_folds, modelType=modType, max_length=max_length, datasets=datasets, mask_strat=masking_strategy, few_shot=few_shot)
+    # for k_val in [1, 5, 10, 15, 20, 25, 30, 35]:
+    #     few_shot["k"] = k_val
+    #     for lr_val in [0.001, 0.005, 0.0001, 0.0005, 0.00001, 0.00005]:
+    #         param_grid["learning_rate"] = lr_val
+    #
+    #         run(outputPath=outputPath, UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
+    #                 mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, mainTask=mainTask, CSSRS_n_label=CSSRS_n_labels, boolDict=boolDict, hyperparameters=param_grid,
+    #                 n_folds= number_of_folds, modelType=modType, max_length=max_length, datasets=datasets, mask_strat=masking_strategy, few_shot=few_shot)
 
 
 global_max_evals = 30

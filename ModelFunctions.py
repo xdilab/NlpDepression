@@ -435,3 +435,27 @@ def RNNModel2(param_grid, num_channels, num_features, num_label, e_type, modelTy
         dot_img_file = f'Cascade_{e_type}.png'
         tf.keras.utils.plot_model(nMod, to_file=dot_img_file, show_shapes=False, show_layer_names=False)
     return nMod
+
+def multiTaskModel(transformerModel, maxLength, CSSRS_n_label, UMD_n_label):
+    # CSSRS_Input = Input(shape=(maxLength,), name="CSSRS_Input", dtype='int32')
+    # UMD_Input = Input(shape=(maxLength,), name="UMD_Input", dtype='int32')
+
+    CSSRS_Input_Ids = Input(shape=(maxLength,), name="CSSRS_Input_Ids", dtype='int32')
+    CSSRS_Attention_Mask = Input(shape=(maxLength,), name="CSSRS_Attention_Mask", dtype='int32')
+    UMD_Input_Ids = Input(shape=(maxLength,), name="UMD_Input_Ids", dtype='int32')
+    UMD_Attention_Mask = Input(shape=(maxLength,), name="UMD_Attention_Mask", dtype='int32')
+
+
+    # output_embed1 = transformerModel([CSSRS_Input["input_ids"], CSSRS_Input["attention_mask"]])
+    # output_embed2 = transformerModel([UMD_Input["input_ids"], UMD_Input["attention_mask"]])
+    output_embed1 = transformerModel([CSSRS_Input_Ids, CSSRS_Attention_Mask])
+    output_embed2 = transformerModel([UMD_Input_Ids, UMD_Attention_Mask])
+
+    dropout1 = Dropout(0.1)(output_embed1[1])
+    dropout2 = Dropout(0.1)(output_embed2[1])
+
+    CSSRS_out = Dense(CSSRS_n_label, activation="softmax", name="CSSRS_Output")(dropout1)
+    UMD_out = Dense(UMD_n_label, activation="softmax", name="UMD_Output")(dropout2)
+
+    # return Model([CSSRS_Input, UMD_Input], [CSSRS_out, UMD_out])
+    return Model([CSSRS_Input_Ids, CSSRS_Attention_Mask, UMD_Input_Ids, UMD_Attention_Mask], [CSSRS_out, UMD_out])
