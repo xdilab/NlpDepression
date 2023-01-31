@@ -14,6 +14,7 @@ if platform.system() == "Windows":
 
 from tqdm import tqdm  # for our progress bar
 from statistics import mean, median
+from itertools import zip_longest
 
 import string
 from functools import partial
@@ -42,7 +43,8 @@ from tensorflow import convert_to_tensor
 from keras.models import Sequential, Model
 from keras.initializers import Constant
 from keras.layers import Dense, Input, Activation, Flatten, MaxPooling1D, Dropout, Conv1D, Concatenate, Embedding
-from keras.layers import Bidirectional, LSTM, GRU, Attention, Layer, TextVectorization, MultiHeadAttention
+from keras.layers import Bidirectional, LSTM, GRU, Attention, Layer, TextVectorization, MultiHeadAttention, GlobalAveragePooling1D
+import keras.backend as K
 
 from transformers import BertTokenizer, BertConfig, TFBertTokenizer, TFAutoModel
 from transformers import BertModel, RobertaModel, ElectraModel

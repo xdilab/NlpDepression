@@ -609,8 +609,8 @@ def main():
 
     pretrain_datset = "UMD-crowd-A"
     # pretrain_datset = "UMD-expert"
-    # task_dataset = "CSSRS"
-    task_dataset = "UMD-crowd-A"
+    task_dataset = "CSSRS"
+    # task_dataset = "UMD-crowd-A"
     datasets = {"pretrain":pretrain_datset, "task":task_dataset, "multitask":["CSSRS", "UMD-crowd-A"]}
 
     masking_strategy = "random"
@@ -621,7 +621,7 @@ def main():
 
     CSSRS_n_labels = 4
     number_of_folds = 5
-    max_length = 100
+    max_length = 10
 
     mlm_params = {"epochs":30, "batch_size":16, "learning_rate":1e-5}
 
@@ -639,17 +639,21 @@ def main():
                       "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001])}
     else:                                        #Default Values
         param_grid = {"batch_size": 32,          #32, 4 for original CNN
-                      "epochs": 15,              #10, 50 for original CNN
+                      "epochs": 2,              #10, 50 for original CNN
                       "learning_rate":0.0001}     #0.001
 
     boolDict = {"split":splitBool, "CV":CVBool, "KI":know_infuse,
                 "SMOTE":SMOTE_bool, "weight":weight_bool, "tuning":parameter_tune,
                 "MultiTask":multiTask_bool}
 
-    outputPath = os.path.join(outputPath, "01_25_23")
+    if boolDict["MultiTask"]:
+        outputPath = os.path.join(outputPath, "01_26_23 (multitask)")
+    else:
+        outputPath = os.path.join(outputPath, "01_26_23")
+
     if not os.path.exists(outputPath):
         os.mkdir(outputPath)
-    #
+
     if boolDict["MultiTask"]:
         MultiTaskrun(outputPath=outputPath, UMD_path=UMD_path, CSSRS_path=CSSRS_path, model_name=model_name, mlm_params=mlm_params,
             mlm_pretrain=mlm_pretrain, transferLearning=transferLearn, mainTask=mainTask, CSSRS_n_label=CSSRS_n_labels,

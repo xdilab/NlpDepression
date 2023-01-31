@@ -1,8 +1,9 @@
+import keras.optimizers
 from Libraries import *
 from ModelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, RNNModel, objectiveFunctionRNN, \
-TFSentenceTransformer, E2ESentenceTransformer, multiTaskModel
+TFSentenceTransformer, E2ESentenceTransformer, multiTaskModel, multiTaskModel1
 from HelperFunctions import getLabels, extractList,getXfromBestModelfromTrials, printPredictions, \
-    printOverallResults, onehotEncode, printMLMResults
+    printOverallResults, onehotEncode, printMLMResults, printOverallResultsMultiTask
 from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
 from StatisticsFunctions import getStatistics, getSummStats, softmax
 from ImportFunctions import importUMD, importCSSRS, getModel, getTokenizer, getRegularModel, getMainTaskModel, getMultiTaskModel
@@ -167,21 +168,25 @@ def MultiTaskrunFold(outputPath, filespath, model, model_name, tokenizer, modelT
         # print(type(modelTrain1["input_ids"][0][0]))
         # input("WAIT")
 
-        nnModel = multiTaskModel(model, max_length, num_labels, 4)
+        nnModel1 = multiTaskModel1(model, "CSSRS", max_length, num_labels)
+        nnModel2 = multiTaskModel1(model, "UMD", max_length, num_labels)
+
         metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
         learn_rate = hyperparameters["learning_rate"]
         # learn_rate = tf.keras.optimizers.schedules.ExponentialDecay(hyperparameters["learning_rate"], decay_steps=30, decay_rate=0.95, staircase=True)
 
-        if model_name.upper() != "SBERT":
+        if model_name.upper() == "SBERT":
             loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=True),
                     'UMD_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=True)}
         else:
             loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False),
                     'UMD_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False)}
+            # loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False)}
 
-        nnModel.compile(optimizer=Adam(learning_rate=learn_rate),
-                     loss=loss,
-                     metrics=metrics)
+
+        # nnModel.compile(optimizer=Adam(learning_rate=learn_rate),
+        #              loss=loss,
+        #              metrics=metrics)
 
         # pred = nnModel(modelTrain)
         # print(f"output shape: {pred.shape}")
@@ -209,31 +214,114 @@ def MultiTaskrunFold(outputPath, filespath, model, model_name, tokenizer, modelT
                                  batch_size=hyperparameters["batch_size"], callbacks=[es],
                                   verbose=2)
         else:
-            print(modelTrain1)
-            history = nnModel.fit([modelTrain1["input_ids"], modelTrain1["attention_mask"], modelTrain2["input_ids"],
-                                   modelTrain2["attention_mask"]],
-                                  [y_train_fold1, y_train_fold2],
-                                  validation_data=([modelTrain1["input_ids"], modelTrain1["attention_mask"], modelTrain2["input_ids"], modelTrain2["attention_mask"]],
-                                  [y_train_fold1, y_train_fold2]),
-                                  epochs=hyperparameters["epochs"],
-                                  batch_size=hyperparameters["batch_size"], callbacks=[es],
-                                  verbose=2)
-            # history = nnModel.fit([modelTrain1["input_ids"], modelTrain1["attention_mask"], modelTrain2["input_ids"], modelTrain2["attention_mask"]],
-            #                       [y_train_fold1, y_train_fold1, y_train_fold2, y_train_fold2],
-            #                       validation_data=([modelTrain1["input_ids"], modelTrain1["attention_mask"], modelTrain2["input_ids"], modelTrain2["attention_mask"]], [y_train_fold1, y_train_fold1, y_train_fold2, y_train_fold2]),
+            # print(modelTrain1)
+            modelTrain1_dataset = tf.data.Dataset.from_tensor_slices((modelTrain1, y_train_fold1))
+            modelTrain2_dataset = tf.data.Dataset.from_tensor_slices((modelTrain2, y_train_fold2))
+            # print(modelTrain1_dataset)
+            optimizer = keras.optimizers.Adam(learning_rate=hyperparameters["learning_rate"])
+            loss_fn1 = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
+            loss_fn2 = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
+            train_accuracy1 = tf.keras.metrics.CategoricalAccuracy()
+            train_accuracy2 = tf.keras.metrics.CategoricalAccuracy()
+
+            num_epochs = hyperparameters["epochs"]
+            batch_size = hyperparameters["batch_size"]
+
+            modelTrain1_dataset = modelTrain1_dataset.batch(batch_size)
+            modelTrain2_dataset = modelTrain2_dataset.batch(batch_size)
+
+            loss_values1 = []
+            acc_values1 = []
+
+            loss_values2 = []
+            acc_values2 = []
+
+            for epoch in range(num_epochs):
+                print("\nStart of epoch %d" % (epoch,))
+                # for (step, (x_batch_train1, y_batch_train1)), (step2, (x_batch_train2, y_batch_train2)) in zip_longest(enumerate(modelTrain1_dataset), enumerate(modelTrain2_dataset), fillvalue= ""):
+                batch_loss = 0
+                for step, (x_batch_train1, y_batch_train1) in enumerate(modelTrain1_dataset):
+
+                    with tf.GradientTape() as tape:
+                        logits = nnModel1(x_batch_train1, training=True)
+                        loss_value = loss_fn1(y_batch_train1, logits)
+                        batch_loss += loss_value
+
+                    grads = tape.gradient(loss_value, nnModel1.trainable_weights)
+                    optimizer.apply_gradients(zip(grads, nnModel1.trainable_weights))
+                    train_accuracy1.update_state(y_batch_train1, logits)
+
+
+                loss_values1.append(batch_loss.numpy())
+
+                # for step2, (x_batch_train2, y_batch_train2) in enumerate(modelTrain2_dataset):
+
+
+                train_acc = train_accuracy1.result()
+                acc_values1.append(train_acc)
+                print("Training acc over epoch: %.4f" % (float(train_acc),))
+
+                batch_loss = 0
+                for step2, (x_batch_train2, y_batch_train2) in enumerate(modelTrain2_dataset):
+
+                    with tf.GradientTape() as tape:
+                        logits = nnModel2(x_batch_train2, training=True)
+                        loss_value = loss_fn2(y_batch_train2, logits)
+                        batch_loss += loss_value
+
+                    grads = tape.gradient(loss_value, nnModel2.trainable_weights)
+                    optimizer.apply_gradients(zip(grads, nnModel2.trainable_weights))
+                    train_accuracy2.update_state(y_batch_train2, logits)
+
+                loss_values2.append(batch_loss.numpy())
+
+                # for step2, (x_batch_train2, y_batch_train2) in enumerate(modelTrain2_dataset):
+
+                train_acc = train_accuracy2.result().numpy()
+                acc_values2.append(train_acc)
+                print("Training acc over epoch: %.4f" % (float(train_acc),))
+
+
+            print(loss_values1)
+            plt.plot(range(num_epochs), loss_values1)
+            plt.xlabel("Epoch")
+            plt.ylabel('Loss')
+            plt.show()
+
+            print(acc_values1)
+            plt.plot(range(num_epochs), acc_values1)
+            plt.xlabel("Epoch")
+            plt.ylabel('Accuracy')
+            plt.show()
+
+            print(loss_values2)
+            plt.plot(range(num_epochs), loss_values2)
+            plt.xlabel("Epoch")
+            plt.ylabel('Loss')
+            plt.show()
+
+            print(acc_values2)
+            plt.plot(range(num_epochs), acc_values2)
+            plt.xlabel("Epoch")
+            plt.ylabel('Accuracy')
+            plt.show()
+            exit()
+
+            # history = nnModel.fit([modelTrain1, modelTrain2],
+            #                       {"CSSRS_Output": y_train_fold1, "UMD_Output": y_train_fold2},
+            #                       validation_data=([modelTrain1,modelTrain2],
+            #                                        {"CSSRS_Output": y_train_fold1, "UMD_Output": y_train_fold2}),
             #                       epochs=hyperparameters["epochs"],
             #                       batch_size=hyperparameters["batch_size"], callbacks=[es],
             #                       verbose=2)
 
-    # pred = nnModel(modelTrain)
-    # print(f"output shape: {pred.shape}")
-    # nnModel([modelTrain]).summary()
 
     tf.keras.backend.clear_session()
     tf.random.set_seed(seed)
     # nnModel = load_model(checkpointName)
-    scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
-    y_pred_proba = nnModel.predict(modelTest)
+    # scores = {}
+    scores = nnModel.evaluate([modelTest1, modelTest2], {"CSSRS_Output": y_test_fold1, "UMD_Output": y_test_fold2}, verbose=0)
+    y_pred_proba = nnModel.predict([modelTest1, modelTest2])
 
 
     return nnModel, history, scores, y_pred_proba, hyperparameters
@@ -390,21 +478,34 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
         df1 = pd.DataFrame({"Post": main_df1["Post"], "Label": main_df1["Label"]}, columns=['Post', 'Label']) #CSSRS
         df2 = pd.DataFrame({"Post": main_df2["Post"], "Label": main_df2["Label"]}, columns=['Post', 'Label']) #UMD
 
+        # number_to_sample = [84, 36, 90, 290]
+        # df2 = df2.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], random_state=seed))
+        # df2 = df2.reset_index(drop=True)
+
         # Create alias for principal embedding
         # Holdover from previous code. Will remove once I remove all the principal conceptnet embedding code
 
         if boolDict["CV"] == True:
             # Define per-fold score containers
-            acc_per_fold = []
-            loss_per_fold = []
-            fold_stats = []
-            fold_matrix = []
+            acc_per_fold1 = []
+            loss_per_fold1 = []
+            fold_stats1 = []
+            fold_matrix1 = []
+            test_size_per_fold1 = []
+
+            acc_per_fold2 = []
+            loss_per_fold2 = []
+            fold_stats2 = []
+            fold_matrix2 = []
+            test_size_per_fold2 = []
+
             fold_hyper = []
-            test_size_per_fold = []
 
             #Initialize dataframe for overall results
-            whole_results = pd.DataFrame({"Actual": pd.Series(dtype=int), "Predicted": pd.Series(dtype=int),
-                                          "PredictedProba": pd.Series(dtype=int), "Fold": pd.Series(dtype=int)})
+            whole_results = pd.DataFrame({"Actual_CSSRS": pd.Series(dtype=int), "Predicted_CSSRS": pd.Series(dtype=int),
+                                          "PredictedProba_CSSRS": pd.Series(dtype=int), "Fold_CSSRS": pd.Series(dtype=int),
+                                          "Actual_UMD": pd.Series(dtype=int), "Predicted_UMD": pd.Series(dtype=int),
+                                          "PredictedProba_UMD": pd.Series(dtype=int), "Fold_UMD": pd.Series(dtype=int)})
             fold_results = []
 
             # Initalize stratified K-Fold splitting function
@@ -510,46 +611,83 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                                                         y_test_fold1=y_test_fold1, y_test_fold2=y_test_fold2,
                                                         boolDict=boolDict, few_shot=few_shot)
 
-                train_auc = history.history['auc']
-                val_auc = history.history['val_auc']
-                train_acc = history.history['accuracy']
-                val_acc = history.history['val_accuracy']
+                train_CSSRS_auc = history.history['CSSRS_Output_auc']
+                train_UMD_auc = history.history['UMD_Output_auc']
+                val_CSSRS_auc = history.history['val_CSSRS_Output_auc']
+                val_UMD_auc = history.history['val_UMD_Output_auc']
+
+                train_CSSRS_acc = history.history['CSSRS_Output_accuracy']
+                train_UMD_acc = history.history['UMD_Output_accuracy']
+                val_CSSRS_acc = history.history['val_CSSRS_Output_accuracy']
+                val_UMD_acc = history.history['val_UMD_Output_accuracy']
+
                 train_loss = history.history['loss']
                 val_loss = history.history['val_loss']
-                epochs = range(len(train_auc))
+
+                train_CSSRS_loss = history.history['CSSRS_Output_loss']
+                train_UMD_loss = history.history['UMD_Output_loss']
+                val_CSSRS_loss = history.history['val_CSSRS_Output_loss']
+                val_UMD_loss = history.history['val_UMD_Output_loss']
+                epochs = range(len(train_CSSRS_auc))
 
                 fold_results.append(
-                    {"train_auc": train_auc, "val_auc": val_auc, "train_acc": train_acc, "val_acc": val_acc,
-                     "train_loss": train_loss, "val_loss": val_loss, "epochs": epochs})
+                    {"train_CSSRS_auc": train_CSSRS_auc, "val_CSSRS_auc": val_CSSRS_auc, "train_CSSRS_acc": train_CSSRS_acc, "val_CSSRS_acc": val_CSSRS_acc,
+                     "train_CSSRS_loss": train_CSSRS_loss, "val_CSSRS_loss": val_CSSRS_loss,
+                     "train_UMD_auc": train_UMD_auc, "val_UMD_auc": val_UMD_auc, "train_UMD_acc": train_UMD_acc, "val_UMD_acc": val_UMD_acc,
+                     "train_UMD_loss": train_UMD_loss, "val_UMD_loss": val_UMD_loss,"epochs": epochs})
 
                 # Generate generalization metrics
                 print(
-                    f'Score for fold {fold_num}: {nnModel.metrics_names[0]} of {scores[0]}; {nnModel.metrics_names[1]} of {scores[1] * 100}%')
-                acc_per_fold.append(scores[1] * 100)
-                loss_per_fold.append(scores[0])
+                    f'CSSRS Score for fold {fold_num}: {nnModel.metrics_names[1]} of {scores[1]}; {nnModel.metrics_names[3]} of {scores[3] * 100}%')
+                print(
+                    f'UMD Score for fold {fold_num}: {nnModel.metrics_names[2]} of {scores[2]}; {nnModel.metrics_names[5]} of {scores[5] * 100}%')
+
+                acc_per_fold1.append(scores[3] * 100)
+                acc_per_fold2.append(scores[5] * 100)
+
+                loss_per_fold1.append(scores[1])
+                loss_per_fold2.append(scores[2])
+
                 fold_hyper.append(hyperparameters)
 
-                if model_name.upper() != "SBERT":
+                if model_name.upper() == "SBERT":
                     list_probs = list(map(softmax, y_pred_proba.logits))
                     list_probs = [l.tolist() for l in list_probs]
                 else:
-                    list_probs = y_pred_proba.tolist()
-                y_pred = np.argmax(list_probs, axis=1)
+                    list_probs1 = y_pred_proba[0].tolist()
+                    list_probs2 = y_pred_proba[1].tolist()
+
+                y_pred1 = np.argmax(list_probs1, axis=1)
+                y_pred2 = np.argmax(list_probs2, axis=1)
+
                 whole_results = pd.concat(
-                    [whole_results, pd.DataFrame({"Actual": y_test_fold.numpy().tolist(), "Predicted": y_pred.tolist(),
-                                                  "PredictedProba": list_probs, "Fold": fold_num})],ignore_index=True)
+                    [whole_results, pd.DataFrame({"Actual_CSSRS": y_test_fold1.numpy().tolist(),
+                                                  "Predicted_CSSRS": y_pred1.tolist(),
+                                                  "PredictedProba_CSSRS": list_probs1, "Fold_CSSRS": fold_num,
+                                                  "Actual_UMD": y_test_fold2.numpy().tolist(), "Predicted_UMD": y_pred2.tolist(),
+                                                  "PredictedProba_UMD": list_probs2, "Fold_UMD": fold_num})], ignore_index=True)
 
-                print(classification_report(y_test_fold, y_pred))
+                print(classification_report(y_test_fold1, y_pred1))
+                print(classification_report(y_test_fold2, y_pred2))
 
-                # contains precision, recall, and f1 score for each class
-                report = classification_report(y_test_fold, y_pred, output_dict=True)
+
+                # contains precision, recall, and f1 score for each class for CSSRS
+                report_1 = classification_report(y_test_fold1, y_pred1, output_dict=True)
+                # contains precision, recall, and f1 score for each class for UMD
+                report_2 = classification_report(y_test_fold2, y_pred2, output_dict=True)
+
 
                 # Get only precision, recall, f1-score, and support statistics
                 # filtered_report = {str(label): report[str(label)] for label in range(num_labels)}
 
-                matrix = confusion_matrix(y_test_fold, y_pred)
-                print(f"{CSSRS_n_label}-label confusion matrix")
-                print(matrix)
+                matrix1 = confusion_matrix(y_test_fold1, y_pred1)
+                print(f"{CSSRS_n_label}-label confusion matrix (CSSRS)")
+                print(matrix1)
+
+                matrix2 = confusion_matrix(y_test_fold2, y_pred2)
+                print(f"4-label confusion matrix (UMD)")
+                print(matrix2)
+
                 # Increase Fold Number
                 fold_num = fold_num + 1
 
@@ -558,21 +696,28 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
             # == Provide average scores ==
             print('------------------------------------------------------------------------')
             print('Score per fold')
-            for i in range(0, len(acc_per_fold)):
+            for i in range(0, len(acc_per_fold1)):
                 print('------------------------------------------------------------------------')
-                print(f'> Fold {i + 1} - Loss: {loss_per_fold[i]} - Accuracy: {acc_per_fold[i]}%')
+                print(f'> Fold {i + 1} - CSSRS - Loss: {loss_per_fold1[i]} - Accuracy: {acc_per_fold1[i]}%')
+                print(f'> Fold {i + 1} - UMD - Loss: {loss_per_fold2[i]} - Accuracy: {acc_per_fold2[i]}%')
             print('------------------------------------------------------------------------')
             print('Average scores for all folds:')
-            print(f'> Accuracy: {np.mean(acc_per_fold)} (+- {np.std(acc_per_fold)})')
-            print(f'> Loss: {np.mean(loss_per_fold)}')
+            print(f'> CSSRS - Accuracy: {np.mean(acc_per_fold1)} (+- {np.std(acc_per_fold1)})')
+            print(f'> CSSRS - Loss: {np.mean(loss_per_fold1)}')
+            print(f'> UMD - Accuracy: {np.mean(acc_per_fold2)} (+- {np.std(acc_per_fold2)})')
+            print(f'> UMD - Loss: {np.mean(loss_per_fold2)}')
             print('------------------------------------------------------------------------')
 
-            overallResults = getStatistics(outputPath, whole_results["Actual"], whole_results["PredictedProba"],
-                                           whole_results["Predicted"], CSSRS_n_label)
+            overallResults1 = getStatistics(outputPath, whole_results["Actual_CSSRS"], whole_results["PredictedProba_CSSRS"],
+                                           whole_results["Predicted_CSSRS"], CSSRS_n_label)
+            overallResults2 = getStatistics(outputPath, whole_results["Actual_UMD"], whole_results["PredictedProba_UMD"],
+                                           whole_results["Predicted_UMD"], 4)
+
+
             # whole_results.to_csv(os.path.join(outputPath, "Actual_vs_Predicted.csv"), index=False)
             endTime = datetime.now()
             elapsedTime = endTime - startTime
-            outputFileName = f"OverallResults {CSSRS_n_label}Label.csv"
+            outputFileName = f"MultiTask OverallResults {CSSRS_n_label}Label.csv"
 
         else:
             # pass
@@ -621,9 +766,9 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
         printMLMResults(outputPath=new_output_path, model_name=model_name, mask_strat=mask_strat, mlm_y_loss=mlm_y_loss,
                         mlm_params=mlm_params)
     else:
-        printOverallResults(outputPath=outputPath, fileName=outputFileName, mainTaskBool=mainTask,
+        printOverallResultsMultiTask(outputPath=outputPath, fileName=outputFileName, mainTaskBool=mainTask,
                             n_label=CSSRS_n_label, max_length=max_length, boolDict=boolDict,
-                            numCV=n_folds, model_type=modelType, stats=overallResults, pretrain_bool=mlm_pretrain,
-                            hyperparameters=fold_hyper, execTime=elapsedTime, whole_results=whole_results,
+                            numCV=n_folds, model_type=modelType, stats1=overallResults1, stats2=overallResults2,
+                            pretrain_bool=mlm_pretrain, hyperparameters=fold_hyper, execTime=elapsedTime, whole_results=whole_results,
                             fold_results=fold_results, model_name=model_name, datasets=datasets, mask_strat=mask_strat,
                             mlm_params=mlm_params, transferLearning=transferLearning, mlm_y_loss=mlm_y_loss, few_shot=few_shot)
