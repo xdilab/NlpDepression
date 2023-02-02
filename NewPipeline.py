@@ -621,7 +621,7 @@ def main():
 
     CSSRS_n_labels = 4
     number_of_folds = 5
-    max_length = 10
+    max_length = 512
 
     mlm_params = {"epochs":30, "batch_size":16, "learning_rate":1e-5}
 
@@ -632,6 +632,23 @@ def main():
     weight_bool = False
     multiTask_bool = True
 
+
+    # if custom, then use the gradientTape
+    # if blank, use normal model.fit
+    # trainStrat = ""
+    trainStrat = "custom"
+
+    if multiTask_bool == True:
+        if trainStrat == "custom":
+            # if oversample, oversample CSSRS to size of UMD
+            # if undersample, undersample UMD to size of CSSRS
+            # if blank, do not over/undersample either
+            sampleStrat = ""
+        else:
+            sampleStrat = "oversample"
+    else:
+        sampleStrat = ""
+
     parameter_tune = False
     if parameter_tune == True:
         param_grid = {"epochs": hp.choice("epochs", [10, 25, 50]),
@@ -639,17 +656,18 @@ def main():
                       "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001])}
     else:                                        #Default Values
         param_grid = {"batch_size": 32,          #32, 4 for original CNN
-                      "epochs": 2,              #10, 50 for original CNN
+                      "epochs": 20,              #10, 50 for original CNN
                       "learning_rate":0.0001}     #0.001
 
     boolDict = {"split":splitBool, "CV":CVBool, "KI":know_infuse,
                 "SMOTE":SMOTE_bool, "weight":weight_bool, "tuning":parameter_tune,
-                "MultiTask":multiTask_bool}
+                "MultiTask":multiTask_bool, "samplingStrategy": sampleStrat,
+                "customTraining":trainStrat}
 
     if boolDict["MultiTask"]:
-        outputPath = os.path.join(outputPath, "01_26_23 (multitask)")
+        outputPath = os.path.join(outputPath, "02_01_23 (multitask)")
     else:
-        outputPath = os.path.join(outputPath, "01_26_23")
+        outputPath = os.path.join(outputPath, "02_01_23")
 
     if not os.path.exists(outputPath):
         os.mkdir(outputPath)

@@ -168,161 +168,293 @@ def MultiTaskrunFold(outputPath, filespath, model, model_name, tokenizer, modelT
         # print(type(modelTrain1["input_ids"][0][0]))
         # input("WAIT")
 
-        nnModel1 = multiTaskModel1(model, "CSSRS", max_length, num_labels)
-        nnModel2 = multiTaskModel1(model, "UMD", max_length, num_labels)
+        if boolDict["customTraining"] != "custom":
+            metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
+            learn_rate = hyperparameters["learning_rate"]
+            # learn_rate = tf.keras.optimizers.schedules.ExponentialDecay(hyperparameters["learning_rate"], decay_steps=30, decay_rate=0.95, staircase=True)
 
-        metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
-        learn_rate = hyperparameters["learning_rate"]
-        # learn_rate = tf.keras.optimizers.schedules.ExponentialDecay(hyperparameters["learning_rate"], decay_steps=30, decay_rate=0.95, staircase=True)
+            if model_name.upper() == "SBERT":
+                loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=True),
+                        'UMD_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=True)}
+            else:
+                loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False),
+                        'UMD_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False)}
 
-        if model_name.upper() == "SBERT":
-            loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=True),
-                    'UMD_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=True)}
-        else:
-            loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False),
-                    'UMD_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False)}
-            # loss = {'CSSRS_Output': tf.keras.losses.CategoricalCrossentropy(from_logits=False)}
+            nnModel = multiTaskModel(model, max_length, 4, 4)
+            nnModel.compile(optimizer=Adam(learning_rate=learn_rate),
+                         loss=loss,
+                         metrics=metrics)
 
+            # pred = nnModel([modelTrain1, modelTrain2])
+            # print(f"output shape: {pred.shape}")
+            # nnModel([modelTrain]).summary()
 
-        # nnModel.compile(optimizer=Adam(learning_rate=learn_rate),
-        #              loss=loss,
-        #              metrics=metrics)
-
-        # pred = nnModel(modelTrain)
-        # print(f"output shape: {pred.shape}")
-        # nnModel([modelTrain]).summary()
-
-    # if model_name.upper() != "SBERT":
-    if boolDict["weight"]:
-        if type(X_val_fold)==pd.Series:
-            history = nnModel.fit(modelTrain, y_train_fold,
-                                 validation_data=(modelVal, y_val_fold),
-                                 epochs=hyperparameters["epochs"],
-                                 batch_size=hyperparameters["batch_size"], callbacks=[es],
-                                 class_weight=class_weights, verbose=2)
-        else:
-            history = nnModel.fit(modelTrain, y_train_fold,
-                                  validation_data=(modelTrain, y_train_fold),
+            history = nnModel.fit([modelTrain1, modelTrain2],
+                                  {"CSSRS_Output": y_train_fold1, "UMD_Output": y_train_fold2},
+                                  validation_data=([modelTrain1,modelTrain2],
+                                                   {"CSSRS_Output": y_train_fold1, "UMD_Output": y_train_fold2}),
                                   epochs=hyperparameters["epochs"],
                                   batch_size=hyperparameters["batch_size"], callbacks=[es],
-                                  class_weight=class_weights,verbose=2)
-    else:
-        if type(X_val_fold1)==pd.Series:
-            history = nnModel.fit(modelTrain, y_train_fold,
-                                 validation_data=(modelVal, y_val_fold),
-                                 epochs=hyperparameters["epochs"],
-                                 batch_size=hyperparameters["batch_size"], callbacks=[es],
                                   verbose=2)
+
+            scores = nnModel.evaluate([modelTest1, modelTest2],
+                                      {"CSSRS_Output": y_test_fold1, "UMD_Output": y_test_fold2},
+                                      verbose=0)
+            y_pred_proba = nnModel.predict([modelTest1, modelTest2])
+
         else:
-            # print(modelTrain1)
+            nnModel1 = multiTaskModel1(model, "CSSRS", max_length, num_labels)
+            nnModel2 = multiTaskModel1(model, "UMD", max_length, num_labels)
+
             modelTrain1_dataset = tf.data.Dataset.from_tensor_slices((modelTrain1, y_train_fold1))
             modelTrain2_dataset = tf.data.Dataset.from_tensor_slices((modelTrain2, y_train_fold2))
-            # print(modelTrain1_dataset)
+
+            modelVal1_dataset = tf.data.Dataset.from_tensor_slices((modelTrain1, y_train_fold1))
+            # modelVal2_dataset = tf.data.Dataset.from_tensor_slices((modelTrain2, y_train_fold2))
+
             optimizer = keras.optimizers.Adam(learning_rate=hyperparameters["learning_rate"])
-            loss_fn1 = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
-            loss_fn2 = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
+            loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
+
+            # Train metrics
             train_accuracy1 = tf.keras.metrics.CategoricalAccuracy()
             train_accuracy2 = tf.keras.metrics.CategoricalAccuracy()
+            train_auc1 = tf.keras.metrics.AUC()
+            train_auc2 = tf.keras.metrics.AUC()
+
+            # Val metrics
+            val_accuracy1 = tf.keras.metrics.CategoricalAccuracy()
+            val_accuracy2 = tf.keras.metrics.CategoricalAccuracy()
+            val_auc_metric1 = tf.keras.metrics.AUC()
+            val_auc_metric2 = tf.keras.metrics.AUC()
+
+            # Test metrics
+            test_accuracy1 = tf.keras.metrics.CategoricalAccuracy()
+            test_accuracy2 = tf.keras.metrics.CategoricalAccuracy()
+            test_auc_metric1 = tf.keras.metrics.AUC()
+            test_auc_metric2 = tf.keras.metrics.AUC()
 
             num_epochs = hyperparameters["epochs"]
-            batch_size = hyperparameters["batch_size"]
+            # batch_size = hyperparameters["batch_size"]
 
-            modelTrain1_dataset = modelTrain1_dataset.batch(batch_size)
-            modelTrain2_dataset = modelTrain2_dataset.batch(batch_size)
+            def calculateBatchSizes(X, Y, bs):
+                X_num_batches = math.ceil(X / bs)
+                Y_num_batches = math.ceil(Y / bs)
+                if X_num_batches == Y_num_batches:
+                    print(f"Batch size : {bs}, {bs}")
+                    print(f"Number of batches : {X_num_batches}, {Y_num_batches}")
+                    return bs, bs
+
+                wanted_batch_number = max(X_num_batches,
+                                          Y_num_batches)
+
+                if X < Y:
+                    new_batch_size = X / wanted_batch_number
+                    batch_ceil = math.ceil(new_batch_size)
+                    batch_floor = math.floor(new_batch_size)
+
+                    new_X_num_batches_ceil = math.ceil(X/batch_ceil)
+                    new_X_num_batches_floor = math.ceil(X/batch_floor)
+
+                    if new_X_num_batches_ceil == Y_num_batches:
+                        print(f"New batch size : {batch_ceil}, {bs}")
+                        print(f"New number of batches : {new_X_num_batches_ceil}, {Y_num_batches}")
+                        return batch_ceil, bs
+                    elif new_X_num_batches_floor == Y_num_batches:
+                        print(f"New batch size : {batch_floor}, {bs}")
+                        print(f"New number of batches : {new_X_num_batches_floor}, {Y_num_batches}")
+                        return batch_floor, bs
+                    else:
+                        return calculateBatchSizes(X, Y, bs-1)
+
+                if X > Y:
+                    new_batch_size = Y / wanted_batch_number
+                    batch_ceil = math.ceil(new_batch_size)
+                    batch_floor = math.floor(new_batch_size)
+
+                    new_Y_num_batches_ceil = math.ceil(Y/batch_ceil)
+                    new_Y_num_batches_floor = math.ceil(Y/batch_floor)
+
+                    if new_Y_num_batches_ceil == X_num_batches:
+                        print(f"New batch size : {batch_ceil}, {bs}")
+                        print(f"New number of batches : {new_Y_num_batches_ceil}, {X_num_batches}")
+                        return bs, batch_ceil
+                    elif new_Y_num_batches_floor == X_num_batches:
+                        print(f"New batch size : {batch_floor}, {bs}")
+                        print(f"New number of batches : {new_Y_num_batches_floor}, {X_num_batches}")
+                        return bs, batch_floor
+                    else:
+                        return calculateBatchSizes(X, Y, bs-1)
+
+            new_batch_size1, new_batch_size2 = calculateBatchSizes(len(y_train_fold1), len(y_train_fold2), hyperparameters["batch_size"])
+            hyperparameters["batch_size"] = str([new_batch_size1, new_batch_size2])
+
+            modelTrain1_dataset = modelTrain1_dataset.batch(new_batch_size1)
+            modelTrain2_dataset = modelTrain2_dataset.batch(new_batch_size2)
 
             loss_values1 = []
             acc_values1 = []
+            auc_values1 = []
 
             loss_values2 = []
             acc_values2 = []
+            auc_values2 = []
+
+            val_loss_values1 = []
+            val_loss_values2 = []
+            val_acc_values1 = []
+            val_acc_values2 = []
+            val_auc_values1 = []
+            val_auc_values2 = []
 
             for epoch in range(num_epochs):
                 print("\nStart of epoch %d" % (epoch,))
                 # for (step, (x_batch_train1, y_batch_train1)), (step2, (x_batch_train2, y_batch_train2)) in zip_longest(enumerate(modelTrain1_dataset), enumerate(modelTrain2_dataset), fillvalue= ""):
-                batch_loss = 0
-                for step, (x_batch_train1, y_batch_train1) in enumerate(modelTrain1_dataset):
+                batch_loss1 = []
+                batch_loss2 = []
 
+                batch_acc1 = []
+                batch_acc2 = []
+                # Reset training accuracties and AUC for new epoch
+                train_accuracy1.reset_state()
+                train_accuracy2.reset_state()
+                train_auc1.reset_state()
+                train_auc2.reset_state()
+
+                val_accuracy1.reset_state()
+                val_accuracy2.reset_state()
+                val_auc_metric1.reset_state()
+                val_auc_metric2.reset_state()
+
+                for (step, (x_batch_train1, y_batch_train1)), (step2, (x_batch_train2, y_batch_train2)) in zip(enumerate(modelTrain1_dataset), enumerate(modelTrain2_dataset)):
                     with tf.GradientTape() as tape:
-                        logits = nnModel1(x_batch_train1, training=True)
-                        loss_value = loss_fn1(y_batch_train1, logits)
-                        batch_loss += loss_value
+                        # Dataset 1 (CSSRS)
+                        pred_prob1 = nnModel1(x_batch_train1, training=True)
+                        loss_value1 = loss_fn(y_batch_train1, pred_prob1)
+                        batch_loss1.append(loss_value1.numpy())
 
-                    grads = tape.gradient(loss_value, nnModel1.trainable_weights)
-                    optimizer.apply_gradients(zip(grads, nnModel1.trainable_weights))
-                    train_accuracy1.update_state(y_batch_train1, logits)
-
-
-                loss_values1.append(batch_loss.numpy())
-
-                # for step2, (x_batch_train2, y_batch_train2) in enumerate(modelTrain2_dataset):
-
-
-                train_acc = train_accuracy1.result()
-                acc_values1.append(train_acc)
-                print("Training acc over epoch: %.4f" % (float(train_acc),))
-
-                batch_loss = 0
-                for step2, (x_batch_train2, y_batch_train2) in enumerate(modelTrain2_dataset):
-
+                        grads = tape.gradient(loss_value1, nnModel1.trainable_weights)
+                        optimizer.apply_gradients(zip(grads, nnModel1.trainable_weights))
+                        train_accuracy1.update_state(y_batch_train1, pred_prob1)
+                        train_auc1.update_state(y_batch_train1, pred_prob1)
                     with tf.GradientTape() as tape:
-                        logits = nnModel2(x_batch_train2, training=True)
-                        loss_value = loss_fn2(y_batch_train2, logits)
-                        batch_loss += loss_value
+                        # Dataset 2 (UMD)
+                        pred_prob2 = nnModel2(x_batch_train2, training=True)
+                        loss_value2 = loss_fn(y_batch_train2, pred_prob2)
+                        batch_loss2.append(loss_value2.numpy())
 
-                    grads = tape.gradient(loss_value, nnModel2.trainable_weights)
-                    optimizer.apply_gradients(zip(grads, nnModel2.trainable_weights))
-                    train_accuracy2.update_state(y_batch_train2, logits)
+                        grads = tape.gradient(loss_value2, nnModel2.trainable_weights)
+                        optimizer.apply_gradients(zip(grads, nnModel2.trainable_weights))
+                        train_accuracy2.update_state(y_batch_train2, pred_prob2)
+                        train_auc2.update_state(y_batch_train2, pred_prob2)
 
-                loss_values2.append(batch_loss.numpy())
+                # Append sum of batch losses for this epoch to list
+                loss_values1.append(sum(batch_loss1))
+                loss_values2.append(sum(batch_loss2))
 
-                # for step2, (x_batch_train2, y_batch_train2) in enumerate(modelTrain2_dataset):
+                # Append overall accuracy of batches for this epoch to list
+                acc_values1.append(train_accuracy1.result().numpy())
+                acc_values2.append(train_accuracy2.result().numpy())
 
-                train_acc = train_accuracy2.result().numpy()
-                acc_values2.append(train_acc)
-                print("Training acc over epoch: %.4f" % (float(train_acc),))
+                # Append overall AUC of batches for this epoch to list
+                auc_values1.append(train_auc1.result().numpy())
+                auc_values2.append(train_auc2.result().numpy())
+
+                print("Dataset 1 ) Training acc, AUC over epoch: %.4f, %.4f" % (float(train_accuracy1.result().numpy()), float(train_auc1.result().numpy()),))
+                print("Dataset 2 ) Training acc, AUC over epoch: %.4f, %.4f" % (float(train_accuracy2.result().numpy()), float(train_auc2.result().numpy()),))
+
+                # Get predicted probs and loss for validation set for dataset1
+                val_pred_prob1 = nnModel1([modelTrain1["input_ids"], modelTrain1["token_type_ids"], modelTrain1["attention_mask"]])
+                val_loss_value1 = loss_fn(y_train_fold1, val_pred_prob1)
+                val_accuracy1.update_state(y_train_fold1, val_pred_prob1)
+                val_auc_metric1.update_state(y_train_fold1, val_pred_prob1)
+                # Update lists for current epoch
+                val_loss_values1.append(val_loss_value1.numpy())
+                val_acc_values1.append(val_accuracy1.result().numpy())
+                val_auc_values1.append(val_auc_metric1.result().numpy())
+
+                # Get predicted probs and loss for validation set for dataset2
+                val_pred_prob2 = nnModel2([modelTrain2["input_ids"], modelTrain2["token_type_ids"], modelTrain2["attention_mask"]])
+                val_loss_value2 = loss_fn(y_train_fold2, val_pred_prob2)
+                val_accuracy2.update_state(y_train_fold2, val_pred_prob2)
+                val_auc_metric2.update_state(y_train_fold2, val_pred_prob2)
+                # Update lists for current epoch
+                val_loss_values2.append(val_loss_value2.numpy())
+                val_acc_values2.append(val_accuracy2.result().numpy())
+                val_auc_values2.append(val_auc_metric2.result().numpy())
+
+            # print(loss_values1)
+            # plt.plot(range(num_epochs), loss_values1)
+            # plt.xlabel("Epoch")
+            # plt.ylabel('Loss')
+            # plt.show()
+            #
+            # print(acc_values1)
+            # plt.plot(range(num_epochs), acc_values1)
+            # plt.xlabel("Epoch")
+            # plt.ylabel('Accuracy')
+            # plt.show()
+            #
+            # print(loss_values2)
+            # plt.plot(range(num_epochs), loss_values2)
+            # plt.xlabel("Epoch")
+            # plt.ylabel('Loss')
+            # plt.show()
+            #
+            # print(acc_values2)
+            # plt.plot(range(num_epochs), acc_values2)
+            # plt.xlabel("Epoch")
+            # plt.ylabel('Accuracy')
+            # plt.show()
+
+            history = {}
+            history['CSSRS_Output_auc'] = auc_values1
+            history['UMD_Output_auc'] = auc_values2
+            history['val_CSSRS_Output_auc'] = val_auc_values1
+            history['val_UMD_Output_auc'] = val_auc_values2
+
+            history['CSSRS_Output_accuracy'] = acc_values1
+            history['UMD_Output_accuracy'] = acc_values2
+            history['val_CSSRS_Output_accuracy'] = val_acc_values1
+            history['val_UMD_Output_accuracy'] = val_acc_values2
+
+            history['loss'] = [loss_values1[i] + loss_values2[i] for i in range(len(loss_values1))]
+            history['val_loss'] = [val_loss_values1[i] + val_loss_values2[i] for i in range(len(val_loss_values1))]
+
+            history['CSSRS_Output_loss'] = loss_values1
+            history['UMD_Output_loss'] = loss_values2
+            history['val_CSSRS_Output_loss'] = val_loss_values1
+            history['val_UMD_Output_loss'] = val_loss_values2
 
 
-            print(loss_values1)
-            plt.plot(range(num_epochs), loss_values1)
-            plt.xlabel("Epoch")
-            plt.ylabel('Loss')
-            plt.show()
+            # Dataset 1 Test
+            y_pred_proba_test1 = nnModel1([modelTest1["input_ids"], modelTest1["token_type_ids"], modelTest1["attention_mask"]])
+            test_accuracy1.update_state(y_test_fold1, y_pred_proba_test1)
+            test_auc_metric1.update_state(y_test_fold1, y_pred_proba_test1)
 
-            print(acc_values1)
-            plt.plot(range(num_epochs), acc_values1)
-            plt.xlabel("Epoch")
-            plt.ylabel('Accuracy')
-            plt.show()
+            test_loss1 = loss_fn(y_test_fold1, y_pred_proba_test1).numpy()
+            test_acc1 = test_accuracy1.result().numpy()
+            test_auc1 = test_auc_metric1.result().numpy()
 
-            print(loss_values2)
-            plt.plot(range(num_epochs), loss_values2)
-            plt.xlabel("Epoch")
-            plt.ylabel('Loss')
-            plt.show()
+            # Dataset 2 Test
+            y_pred_proba_test2 = nnModel2([modelTest2["input_ids"], modelTest2["token_type_ids"], modelTest2["attention_mask"]])
+            test_accuracy2.update_state(y_test_fold2, y_pred_proba_test2)
+            test_auc_metric2.update_state(y_test_fold2, y_pred_proba_test2)
 
-            print(acc_values2)
-            plt.plot(range(num_epochs), acc_values2)
-            plt.xlabel("Epoch")
-            plt.ylabel('Accuracy')
-            plt.show()
-            exit()
+            test_loss2 = loss_fn(y_test_fold2, y_pred_proba_test2).numpy()
+            test_acc2 = test_accuracy2.result().numpy()
+            test_auc2 = test_auc_metric2.result().numpy()
 
-            # history = nnModel.fit([modelTrain1, modelTrain2],
-            #                       {"CSSRS_Output": y_train_fold1, "UMD_Output": y_train_fold2},
-            #                       validation_data=([modelTrain1,modelTrain2],
-            #                                        {"CSSRS_Output": y_train_fold1, "UMD_Output": y_train_fold2}),
-            #                       epochs=hyperparameters["epochs"],
-            #                       batch_size=hyperparameters["batch_size"], callbacks=[es],
-            #                       verbose=2)
+            total_test_loss = test_loss1 + test_loss2
+
+            nnModel = ['loss', 'CSSRS_Output_loss', 'UMD_Output_loss', 'CSSRS_Output_accuracy', 'CSSRS_Output_auc', 'UMD_Output_accuracy', 'UMD_Output_auc']
+            scores = [total_test_loss, test_loss1, test_loss2, test_acc1, test_auc1, test_acc2, test_auc2]
+            y_pred_proba = [y_pred_proba_test1, y_pred_proba_test2]
 
 
     tf.keras.backend.clear_session()
     tf.random.set_seed(seed)
     # nnModel = load_model(checkpointName)
     # scores = {}
-    scores = nnModel.evaluate([modelTest1, modelTest2], {"CSSRS_Output": y_test_fold1, "UMD_Output": y_test_fold2}, verbose=0)
-    y_pred_proba = nnModel.predict([modelTest1, modelTest2])
-
 
     return nnModel, history, scores, y_pred_proba, hyperparameters
 
@@ -478,9 +610,16 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
         df1 = pd.DataFrame({"Post": main_df1["Post"], "Label": main_df1["Label"]}, columns=['Post', 'Label']) #CSSRS
         df2 = pd.DataFrame({"Post": main_df2["Post"], "Label": main_df2["Label"]}, columns=['Post', 'Label']) #UMD
 
-        # number_to_sample = [84, 36, 90, 290]
-        # df2 = df2.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], random_state=seed))
-        # df2 = df2.reset_index(drop=True)
+        if boolDict["samplingStrategy"] == "undersample":
+            # from 0 to 3
+            number_to_sample = [84, 36, 90, 290]
+            df2 = df2.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], random_state=seed))
+            df2 = df2.reset_index(drop=True)
+        elif boolDict["samplingStrategy"] == "oversample":
+            # from 0 to 3
+            number_to_sample = [425, 351, 158, 94]
+            df1 = df1.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], replace=True, random_state=seed))
+            df1 = df1.reset_index(drop=True)
 
         # Create alias for principal embedding
         # Holdover from previous code. Will remove once I remove all the principal conceptnet embedding code
@@ -514,9 +653,10 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
 
             # Shuffle UMD dataset
             df2 = df2.sample(frac=1, random_state=seed).reset_index(drop=True)
-
+            init_batch_size = hyperparameters["batch_size"]
             # Perform actuall splitting
             for (train_indx1, test_indx1), (train_indx2, test_indx2) in zip(sfk.split(df1["Post"], df1["Label"]), sfk.split(df2["Post"], df2["Label"])):
+                hyperparameters["batch_size"] = init_batch_size
                 train_val_sets = {}
 
                 # Obtain train fold for first dataset
@@ -611,40 +751,77 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                                                         y_test_fold1=y_test_fold1, y_test_fold2=y_test_fold2,
                                                         boolDict=boolDict, few_shot=few_shot)
 
-                train_CSSRS_auc = history.history['CSSRS_Output_auc']
-                train_UMD_auc = history.history['UMD_Output_auc']
-                val_CSSRS_auc = history.history['val_CSSRS_Output_auc']
-                val_UMD_auc = history.history['val_UMD_Output_auc']
+                if boolDict["customTraining"] != "custom":
 
-                train_CSSRS_acc = history.history['CSSRS_Output_accuracy']
-                train_UMD_acc = history.history['UMD_Output_accuracy']
-                val_CSSRS_acc = history.history['val_CSSRS_Output_accuracy']
-                val_UMD_acc = history.history['val_UMD_Output_accuracy']
+                    train_CSSRS_auc = history.history['CSSRS_Output_auc']
+                    train_UMD_auc = history.history['UMD_Output_auc']
+                    val_CSSRS_auc = history.history['val_CSSRS_Output_auc']
+                    val_UMD_auc = history.history['val_UMD_Output_auc']
 
-                train_loss = history.history['loss']
-                val_loss = history.history['val_loss']
+                    train_CSSRS_acc = history.history['CSSRS_Output_accuracy']
+                    train_UMD_acc = history.history['UMD_Output_accuracy']
+                    val_CSSRS_acc = history.history['val_CSSRS_Output_accuracy']
+                    val_UMD_acc = history.history['val_UMD_Output_accuracy']
 
-                train_CSSRS_loss = history.history['CSSRS_Output_loss']
-                train_UMD_loss = history.history['UMD_Output_loss']
-                val_CSSRS_loss = history.history['val_CSSRS_Output_loss']
-                val_UMD_loss = history.history['val_UMD_Output_loss']
-                epochs = range(len(train_CSSRS_auc))
+                    train_loss = history.history['loss']
+                    val_loss = history.history['val_loss']
 
-                fold_results.append(
-                    {"train_CSSRS_auc": train_CSSRS_auc, "val_CSSRS_auc": val_CSSRS_auc, "train_CSSRS_acc": train_CSSRS_acc, "val_CSSRS_acc": val_CSSRS_acc,
-                     "train_CSSRS_loss": train_CSSRS_loss, "val_CSSRS_loss": val_CSSRS_loss,
-                     "train_UMD_auc": train_UMD_auc, "val_UMD_auc": val_UMD_auc, "train_UMD_acc": train_UMD_acc, "val_UMD_acc": val_UMD_acc,
-                     "train_UMD_loss": train_UMD_loss, "val_UMD_loss": val_UMD_loss,"epochs": epochs})
+                    train_CSSRS_loss = history.history['CSSRS_Output_loss']
+                    train_UMD_loss = history.history['UMD_Output_loss']
+                    val_CSSRS_loss = history.history['val_CSSRS_Output_loss']
+                    val_UMD_loss = history.history['val_UMD_Output_loss']
+                    epochs = range(len(train_CSSRS_auc))
 
-                # Generate generalization metrics
-                print(
-                    f'CSSRS Score for fold {fold_num}: {nnModel.metrics_names[1]} of {scores[1]}; {nnModel.metrics_names[3]} of {scores[3] * 100}%')
-                print(
-                    f'UMD Score for fold {fold_num}: {nnModel.metrics_names[2]} of {scores[2]}; {nnModel.metrics_names[5]} of {scores[5] * 100}%')
+                    fold_results.append(
+                        {"train_CSSRS_auc": train_CSSRS_auc, "val_CSSRS_auc": val_CSSRS_auc, "train_CSSRS_acc": train_CSSRS_acc, "val_CSSRS_acc": val_CSSRS_acc,
+                         "train_CSSRS_loss": train_CSSRS_loss, "val_CSSRS_loss": val_CSSRS_loss,
+                         "train_UMD_auc": train_UMD_auc, "val_UMD_auc": val_UMD_auc, "train_UMD_acc": train_UMD_acc, "val_UMD_acc": val_UMD_acc,
+                         "train_UMD_loss": train_UMD_loss, "val_UMD_loss": val_UMD_loss,"epochs": epochs})
+
+                    # Generate generalization metrics
+                    print(
+                        f'CSSRS Score for fold {fold_num}: {nnModel.metrics_names[1]} of {scores[1]}; {nnModel.metrics_names[3]} of {scores[3] * 100}%')
+                    print(
+                        f'UMD Score for fold {fold_num}: {nnModel.metrics_names[2]} of {scores[2]}; {nnModel.metrics_names[5]} of {scores[5] * 100}%')
+                else:
+
+                    train_CSSRS_auc = history['CSSRS_Output_auc']
+                    train_UMD_auc = history['UMD_Output_auc']
+                    val_CSSRS_auc = history['val_CSSRS_Output_auc']
+                    val_UMD_auc = history['val_UMD_Output_auc']
+
+                    train_CSSRS_acc = history['CSSRS_Output_accuracy']
+                    train_UMD_acc = history['UMD_Output_accuracy']
+                    val_CSSRS_acc = history['val_CSSRS_Output_accuracy']
+                    val_UMD_acc = history['val_UMD_Output_accuracy']
+
+                    train_loss = history['loss']
+                    val_loss = history['val_loss']
+
+                    train_CSSRS_loss = history['CSSRS_Output_loss']
+                    train_UMD_loss = history['UMD_Output_loss']
+                    val_CSSRS_loss = history['val_CSSRS_Output_loss']
+                    val_UMD_loss = history['val_UMD_Output_loss']
+                    epochs = range(len(train_CSSRS_auc))
+
+                    fold_results.append(
+                        {"train_CSSRS_auc": train_CSSRS_auc, "val_CSSRS_auc": val_CSSRS_auc,
+                         "train_CSSRS_acc": train_CSSRS_acc, "val_CSSRS_acc": val_CSSRS_acc,
+                         "train_CSSRS_loss": train_CSSRS_loss, "val_CSSRS_loss": val_CSSRS_loss,
+                         "train_UMD_auc": train_UMD_auc, "val_UMD_auc": val_UMD_auc, "train_UMD_acc": train_UMD_acc,
+                         "val_UMD_acc": val_UMD_acc,
+                         "train_UMD_loss": train_UMD_loss, "val_UMD_loss": val_UMD_loss, "epochs": epochs})
+
+                    # Generate generalization metrics of test fold
+                    print(
+                        f'CSSRS Score for fold {fold_num}: {nnModel[1]} of {scores[1]}; {nnModel[3]} of {scores[3] * 100}%')
+                    print(
+                        f'UMD Score for fold {fold_num}: {nnModel[2]} of {scores[2]}; {nnModel[5]} of {scores[5] * 100}%')
+
+                "----------------------------------"
 
                 acc_per_fold1.append(scores[3] * 100)
                 acc_per_fold2.append(scores[5] * 100)
-
                 loss_per_fold1.append(scores[1])
                 loss_per_fold2.append(scores[2])
 
@@ -654,18 +831,49 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                     list_probs = list(map(softmax, y_pred_proba.logits))
                     list_probs = [l.tolist() for l in list_probs]
                 else:
-                    list_probs1 = y_pred_proba[0].tolist()
-                    list_probs2 = y_pred_proba[1].tolist()
+                    if boolDict["customTraining"] == "custom":
+                        list_probs1 = y_pred_proba[0].numpy().tolist()
+                        list_probs2 = y_pred_proba[1].numpy().tolist()
+
+                    else:
+                        list_probs1 = y_pred_proba[0].tolist()
+                        list_probs2 = y_pred_proba[1].tolist()
+
 
                 y_pred1 = np.argmax(list_probs1, axis=1)
                 y_pred2 = np.argmax(list_probs2, axis=1)
 
+                list_probs1copy = list_probs1.copy()
+                list_probs2copy = list_probs2.copy()
+
+                y_pred1copy = y_pred1.tolist()
+                y_pred2copy = y_pred2.tolist()
+
+                y_test_fold1copy = y_test_fold1.numpy().tolist()
+                y_test_fold2copy = y_test_fold2.numpy().tolist()
+
+                if len(list_probs1) < len(list_probs2):
+                    [list_probs1copy.append("") for x in range(len(list_probs2)-len(list_probs1))]
+                    [y_pred1copy.append("") for x in range(len(y_pred2) - len(y_pred1))]
+                    [y_test_fold1copy.append("") for x in range(len(y_test_fold2copy) - len(y_test_fold1copy))]
+                elif len(list_probs1) > len(list_probs2):
+                    [list_probs2copy.append("") for x in range(len(list_probs1) - len(list_probs2))]
+                    [y_pred2copy.append("") for x in range(len(y_pred1) - len(y_pred2))]
+                    [y_test_fold2copy.append("") for x in range(len(y_test_fold1copy) - len(y_test_fold2copy))]
+
+                print(len(list_probs1))
+                print(len(list_probs2))
+                print(len(y_pred1))
+                print(len(y_pred2))
+                print(len(y_test_fold1copy))
+                print(len(y_test_fold2copy))
+
                 whole_results = pd.concat(
-                    [whole_results, pd.DataFrame({"Actual_CSSRS": y_test_fold1.numpy().tolist(),
-                                                  "Predicted_CSSRS": y_pred1.tolist(),
-                                                  "PredictedProba_CSSRS": list_probs1, "Fold_CSSRS": fold_num,
-                                                  "Actual_UMD": y_test_fold2.numpy().tolist(), "Predicted_UMD": y_pred2.tolist(),
-                                                  "PredictedProba_UMD": list_probs2, "Fold_UMD": fold_num})], ignore_index=True)
+                    [whole_results, pd.DataFrame({"Actual_CSSRS": y_test_fold1copy,
+                                                  "Predicted_CSSRS": y_pred1copy,
+                                                  "PredictedProba_CSSRS": list_probs2copy, "Fold_CSSRS": fold_num,
+                                                  "Actual_UMD": y_test_fold2copy, "Predicted_UMD": y_pred2copy,
+                                                  "PredictedProba_UMD": list_probs2copy, "Fold_UMD": fold_num})], ignore_index=True)
 
                 print(classification_report(y_test_fold1, y_pred1))
                 print(classification_report(y_test_fold2, y_pred2))
@@ -708,10 +916,18 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
             print(f'> UMD - Loss: {np.mean(loss_per_fold2)}')
             print('------------------------------------------------------------------------')
 
-            overallResults1 = getStatistics(outputPath, whole_results["Actual_CSSRS"], whole_results["PredictedProba_CSSRS"],
-                                           whole_results["Predicted_CSSRS"], CSSRS_n_label)
-            overallResults2 = getStatistics(outputPath, whole_results["Actual_UMD"], whole_results["PredictedProba_UMD"],
-                                           whole_results["Predicted_UMD"], 4)
+            if boolDict["customTraining"] != "custom":
+                overallResults1 = getStatistics(outputPath, whole_results["Actual_CSSRS"], whole_results["PredictedProba_CSSRS"],
+                                               whole_results["Predicted_CSSRS"], CSSRS_n_label)
+                overallResults2 = getStatistics(outputPath, whole_results["Actual_UMD"], whole_results["PredictedProba_UMD"],
+                                               whole_results["Predicted_UMD"], 4)
+            else:
+                overallResults1 = getStatistics(outputPath,pd.Series(y_test_fold1.numpy().tolist()),
+                                                pd.Series(list_probs1),
+                                                pd.Series(y_pred1.tolist()), CSSRS_n_label)
+                overallResults2 = getStatistics(outputPath, pd.Series(y_test_fold2.numpy().tolist()),
+                                                pd.Series(list_probs2),
+                                                pd.Series(y_pred2.tolist()), 4)
 
 
             # whole_results.to_csv(os.path.join(outputPath, "Actual_vs_Predicted.csv"), index=False)
