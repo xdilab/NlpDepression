@@ -4,7 +4,7 @@ from Libraries import *
 from ModelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, RNNModel, objectiveFunctionRNN, TFSentenceTransformer, E2ESentenceTransformer
 from HelperFunctions import getLabels, extractList,getXfromBestModelfromTrials, printPredictions, \
     printOverallResults, onehotEncode, printMLMResults
-from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
+# from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
 from StatisticsFunctions import getStatistics, getSummStats, softmax
 from ImportFunctions import importUMD, importCSSRS, getModel, getTokenizer, getRegularModel, getMainTaskModel
 from MultiTaskFiles import MultiTaskrun
@@ -131,14 +131,15 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_
         nnModel = RNNModel(hyperparameters, number_channels, number_features, num_labels, emb_type, model_name,
                            modelType, boolDict["KI"], embed_dimen, preTrainDim, max_length, vocab_sizes, embed_matrices)
     elif modelType == "transformer":
-
         nnModel = model
-        metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc')]
+        metrics = [tf.keras.metrics.CategoricalAccuracy(name='accuracy'), tf.keras.metrics.AUC(name='auc', from_logits=True), tf.keras.metrics.AUC(name='prc', curve='PR', from_logits=True), tf.keras.metrics.AUC(name='auc2',num_thresholds=10000, from_logits=True)]
         learn_rate = hyperparameters["learning_rate"]
         # learn_rate = tf.keras.optimizers.schedules.ExponentialDecay(hyperparameters["learning_rate"], decay_steps=30, decay_rate=0.95, staircase=True)
 
+        # If not using sentence BERT
         if model_name.upper() != "SBERT":
             loss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
+        # If using sentence BERT
         else:
             loss = tf.keras.losses.CategoricalCrossentropy(from_logits=False)
 
@@ -182,12 +183,16 @@ def runFold(outputPath, filespath, model, model_name, tokenizer, modelType, max_
     # print(f"output shape: {pred.shape}")
     # nnModel([modelTrain]).summary()
 
-    tf.keras.backend.clear_session()
-    tf.random.set_seed(seed)
     # nnModel = load_model(checkpointName)
     scores = nnModel.evaluate(modelTest, y_test_fold, verbose=0)
     y_pred_proba = nnModel.predict(modelTest)
 
+    auc3 = tf.keras.metrics.AUC(name='auc3', from_logits=False, num_thresholds=3)
+    auc3.update_state(y_test_fold, list(map(softmax, y_pred_proba.logits)))
+    print(auc3.result().numpy())
+
+    tf.keras.backend.clear_session()
+    tf.random.set_seed(seed)
 
     return nnModel, history, scores, y_pred_proba, hyperparameters
 
@@ -315,7 +320,7 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
 
         split_main_task_dataset_name = datasets["task"].split("-")
         if split_main_task_dataset_name[0] == "CSSRS":
-            main_df = importCSSRS(CSSRS_path, num_labels=CSSRS_n_label)
+            main_df = importCSSRS(CSSRS_path, num_labels=4)
             # Make all text lowercase
             main_df["Post"] = main_df["Post"].apply(lambda x: x.lower())
 
@@ -358,12 +363,17 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
             elif split_main_task_dataset_name[0] == "UMD":
                 df = pd.DataFrame({"Post": main_df["Post"], "Label": main_df["Label"]}, columns=['Post', 'Label'])
 
+        if CSSRS_n_label == 2:
+            df = df[df["Label"].isin([0, 1])]
+        elif CSSRS_n_label == 3:
+            df = df[df["Label"].isin([0, 1, 2])]
         # Create alias for principal embedding
         # Holdover from previous code. Will remove once I remove all the principal conceptnet embedding code
 
         if boolDict["CV"] == True:
             # Define per-fold score containers
             acc_per_fold = []
+            auc_per_fold = []
             loss_per_fold = []
             fold_stats = []
             fold_matrix = []
@@ -469,10 +479,14 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
                      "train_loss": train_loss, "val_loss": val_loss, "epochs": epochs})
 
                 # Generate generalization metrics
-                print(
-                    f'Score for fold {fold_num}: {nnModel.metrics_names[0]} of {scores[0]}; {nnModel.metrics_names[1]} of {scores[1] * 100}%')
-                acc_per_fold.append(scores[1] * 100)
+                print("Keras Scores:")
+                print(f'Score for fold {fold_num}: {nnModel.metrics_names[0]} of {scores[0]}; '
+                      f'{nnModel.metrics_names[1]} of {scores[1] * 100}%; {nnModel.metrics_names[2]} of {scores[2]}; '
+                      f'{nnModel.metrics_names[3]} of {scores[3]}; {nnModel.metrics_names[4]} of {scores[4]}')
+
                 loss_per_fold.append(scores[0])
+                acc_per_fold.append(scores[1] * 100)
+                auc_per_fold.append(scores[2])
                 fold_hyper.append(hyperparameters)
 
                 if model_name.upper() != "SBERT":
@@ -484,6 +498,30 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
                 whole_results = pd.concat(
                     [whole_results, pd.DataFrame({"Actual": y_test_fold.numpy().tolist(), "Predicted": y_pred.tolist(),
                                                   "PredictedProba": list_probs, "Fold": fold_num})],ignore_index=True)
+
+                # y_test_fold = pd.get_dummies(pd.Series(y_test_fold.numpy()), drop_first=False)
+                # print(y_test_fold)
+                if CSSRS_n_label == 2:
+                    list_probs = [x[1] for x in list_probs]
+                    print()
+                    print("SKLearn Scores:")
+                    print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold, list_probs)}")
+                else:
+                    print()
+                    print("SKLearn Scores:")
+                    print("OvR w/ Macro Average")
+                    # print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold, list_probs, multi_class='ovr', average='macro')}")
+                    print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold, list_probs, multi_class='ovr', average='macro')}")
+                    # print("")
+                    # print("OvR w/ Micro Average")
+                    # print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold1, list_probs1, multi_class='ovr', average='micro')}")
+                    # print(f"UMD AUC for fold {fold_num} - {roc_auc_score(y_test_fold2, list_probs2, multi_class='ovr', average='micro')}")
+                    print("")
+                    print("OvR w/ Weighted Average")
+                    print( f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold, list_probs, multi_class='ovr', average='weighted')}")
+                    print("")
+                    print("OvO w/ Macro Average")
+                    print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold, list_probs, multi_class='ovo', average='macro')}")
 
                 print(classification_report(y_test_fold, y_pred))
 
@@ -506,13 +544,21 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
             print('Score per fold')
             for i in range(0, len(acc_per_fold)):
                 print('------------------------------------------------------------------------')
-                print(f'> Fold {i + 1} - Loss: {loss_per_fold[i]} - Accuracy: {acc_per_fold[i]}%')
+                print(f'> Fold {i + 1} - Loss: {loss_per_fold[i]} - Accuracy: {acc_per_fold[i]}% - AUC: {auc_per_fold[i]}')
             print('------------------------------------------------------------------------')
             print('Average scores for all folds:')
             print(f'> Accuracy: {np.mean(acc_per_fold)} (+- {np.std(acc_per_fold)})')
+            print(f'> AUC: {np.mean(auc_per_fold)} (+- {np.std(auc_per_fold)})')
             print(f'> Loss: {np.mean(loss_per_fold)}')
             print('------------------------------------------------------------------------')
 
+            if CSSRS_n_label == 2:
+                list_probs = [x[1] for x in whole_results["PredictedProba"]]
+                print(f"CSSRS AUC for entire test - {roc_auc_score(whole_results['Actual'], list_probs)}")
+            else:
+                list_probs = [x for x in whole_results["PredictedProba"]]
+                print(f"CSSRS AUC for entire test - {roc_auc_score(whole_results['Actual'], list_probs, multi_class='ovr', average='macro')}")
+            exit()
             overallResults = getStatistics(outputPath, whole_results["Actual"], whole_results["PredictedProba"],
                                            whole_results["Predicted"], CSSRS_n_label)
             # whole_results.to_csv(os.path.join(outputPath, "Actual_vs_Predicted.csv"), index=False)
@@ -577,9 +623,12 @@ def run(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_pretrain, 
 def main():
     if platform.system() == "Windows":
         outputPath = r"D:\zProjects\MLM\Output\CSSRS"
-
         UMD_path = r"D:\zProjects\umd_reddit_suicidewatch_dataset_v2"
         CSSRS_path = r"D:\Summer 2022 Project\Reddit C-SSRS\500_Reddit_users_posts_labels.csv"
+
+        # outputPath = r"C:\Users\David Lee\Desktop\Results\MLM\Output\CSSRS"
+        # UMD_path = r"C:\Users\David Lee\Desktop\Datasets\UMD"
+        # CSSRS_path = r"C:\Users\David Lee\Desktop\Datasets\CSSRS\CSRSS_500_Reddit_users_posts_labels.csv"
     elif platform.system() == "Linux":
         outputPath = r"/ddn/home12/r3102/results/MLM"
 
@@ -619,9 +668,9 @@ def main():
     few_shot = {"bool":False,
                 "k":1}
 
-    CSSRS_n_labels = 4
+    CSSRS_n_labels = 3
     number_of_folds = 5
-    max_length = 512
+    max_length = 10
 
     mlm_params = {"epochs":30, "batch_size":16, "learning_rate":1e-5}
 
@@ -630,13 +679,13 @@ def main():
     know_infuse = False
     SMOTE_bool = False
     weight_bool = False
-    multiTask_bool = True
+    multiTask_bool = False
 
 
     # if custom, then use the gradientTape
     # if blank, use normal model.fit
-    # trainStrat = ""
-    trainStrat = "custom"
+    trainStrat = ""
+    # trainStrat = "custom"
 
     if multiTask_bool == True:
         if trainStrat == "custom":
@@ -656,7 +705,7 @@ def main():
                       "learning_rate":hp.choice("learning_rate", [0.01, 0.005, 0.001])}
     else:                                        #Default Values
         param_grid = {"batch_size": 32,          #32, 4 for original CNN
-                      "epochs": 20,              #10, 50 for original CNN
+                      "epochs": 2,              #10, 50 for original CNN
                       "learning_rate":0.0001}     #0.001
 
     boolDict = {"split":splitBool, "CV":CVBool, "KI":know_infuse,
@@ -665,9 +714,9 @@ def main():
                 "customTraining":trainStrat}
 
     if boolDict["MultiTask"]:
-        outputPath = os.path.join(outputPath, "02_01_23 (multitask)")
+        outputPath = os.path.join(outputPath, "02_13_23 (multitask)")
     else:
-        outputPath = os.path.join(outputPath, "02_01_23")
+        outputPath = os.path.join(outputPath, "02_13_23")
 
     if not os.path.exists(outputPath):
         os.mkdir(outputPath)

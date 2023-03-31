@@ -4,7 +4,7 @@ from ModelFunctions import denseNN, cnnModel, cnnModel2, objectiveFunctionCNN, R
 TFSentenceTransformer, E2ESentenceTransformer, multiTaskModel, multiTaskModel1
 from HelperFunctions import getLabels, extractList,getXfromBestModelfromTrials, printPredictions, \
     printOverallResults, onehotEncode, printMLMResults, printOverallResultsMultiTask
-from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
+# from EmbeddingFunctions import BERT_embeddings, getTokens, customDataset, runModel, MaskingFunction, getFeatures
 from StatisticsFunctions import getStatistics, getSummStats, softmax
 from ImportFunctions import importUMD, importCSSRS, getModel, getTokenizer, getRegularModel, getMainTaskModel, getMultiTaskModel
 
@@ -610,16 +610,16 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
         df1 = pd.DataFrame({"Post": main_df1["Post"], "Label": main_df1["Label"]}, columns=['Post', 'Label']) #CSSRS
         df2 = pd.DataFrame({"Post": main_df2["Post"], "Label": main_df2["Label"]}, columns=['Post', 'Label']) #UMD
 
-        if boolDict["samplingStrategy"] == "undersample":
-            # from 0 to 3
-            number_to_sample = [84, 36, 90, 290]
-            df2 = df2.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], random_state=seed))
-            df2 = df2.reset_index(drop=True)
-        elif boolDict["samplingStrategy"] == "oversample":
-            # from 0 to 3
-            number_to_sample = [425, 351, 158, 94]
-            df1 = df1.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], replace=True, random_state=seed))
-            df1 = df1.reset_index(drop=True)
+        # if boolDict["samplingStrategy"] == "undersample":
+        #     # from 0 to 3
+        #     number_to_sample = [84, 36, 90, 290]
+        #     df2 = df2.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], random_state=seed))
+        #     df2 = df2.reset_index(drop=True)
+        # elif boolDict["samplingStrategy"] == "oversample":
+        #     # from 0 to 3
+        #     number_to_sample = [425, 351, 158, 94]
+        #     df1 = df1.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], replace=True, random_state=seed))
+        #     df1 = df1.reset_index(drop=True)
 
         # Create alias for principal embedding
         # Holdover from previous code. Will remove once I remove all the principal conceptnet embedding code
@@ -627,12 +627,14 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
         if boolDict["CV"] == True:
             # Define per-fold score containers
             acc_per_fold1 = []
+            auc_per_fold1 = []
             loss_per_fold1 = []
             fold_stats1 = []
             fold_matrix1 = []
             test_size_per_fold1 = []
 
             acc_per_fold2 = []
+            auc_per_fold2 = []
             loss_per_fold2 = []
             fold_stats2 = []
             fold_matrix2 = []
@@ -666,6 +668,29 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                 fold_train2 = df2.iloc[train_indx2].copy()
                 fold_train2 = fold_train2.reset_index(drop=True)
 
+                if boolDict["samplingStrategy"] == "oversample":
+                    number_to_sample = fold_train1["Label"].value_counts().apply(lambda x: math.ceil((len(fold_train2)/len(fold_train1))*x))
+                    sum_new_counts = sum(number_to_sample)
+                    diff = len(fold_train2)-sum_new_counts
+
+                    # if new total number of training fold of CSSRS is less than that of UMD
+                    if diff > 0:
+                        number_to_sample[3] += abs(diff) # add to smallest category
+                    # if new total number of training fold of CSSRS is less than that of UMD
+                    elif diff < 0:
+                        number_to_sample[0] -= abs(diff) #subtract from largest category
+
+                    number_to_sample = number_to_sample.values.tolist()
+                    fold_train1 = fold_train1.groupby("Label").apply(lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], replace=True, random_state=seed))
+                    fold_train1 = fold_train1.reset_index(drop=True)
+
+                    print(len(fold_train1))
+                    print(len(fold_train2))
+
+                    print()
+                    print(fold_train1["Label"].value_counts())
+                    print(fold_train2["Label"].value_counts())
+
                 # Implement sampling k from each class for few-shot learning
                 if few_shot["bool"]:
                     fold_train_K = fold_train.groupby("Label").sample(n=few_shot["k"], random_state=seed)
@@ -694,6 +719,36 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                 # Obtain test fold and split into input and labels for first dataset
                 fold_test1 = df1.iloc[test_indx1].copy()
                 fold_test1 = fold_test1.reset_index(drop=True)
+
+                fold_test2 = df2.iloc[test_indx2].copy()
+                fold_test2 = fold_test2.reset_index(drop=True)
+
+                if boolDict["samplingStrategy"] == "oversample":
+                    number_to_sample = fold_test1["Label"].value_counts().apply(
+                        lambda x: math.ceil((len(fold_test2) / len(fold_test1)) * x))
+                    sum_new_counts = sum(number_to_sample)
+                    diff = len(fold_test2) - sum_new_counts
+
+                    # if new total number of training fold of CSSRS is less than that of UMD
+                    if diff > 0:
+                        number_to_sample[3] += abs(diff)  # add to smallest category
+                    # if new total number of training fold of CSSRS is less than that of UMD
+                    elif diff < 0:
+                        number_to_sample[0] -= abs(diff)  # subtract from largest category
+
+                    number_to_sample = number_to_sample.values.tolist()
+                    fold_test1 = fold_test1.groupby("Label").apply(
+                        lambda x: x.sample(n=number_to_sample[x["Label"].unique().item()], replace=True,
+                                           random_state=seed))
+                    fold_test1 = fold_test1.reset_index(drop=True)
+
+                    print(len(fold_test1))
+                    print(len(fold_test2))
+
+                    print()
+                    print(fold_test1["Label"].value_counts())
+                    print(fold_test2["Label"].value_counts())
+
                 X_test_fold1 = fold_test1["Post"]
                 y_test_fold1 = fold_test1["Label"]
 
@@ -779,10 +834,9 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                          "train_UMD_loss": train_UMD_loss, "val_UMD_loss": val_UMD_loss,"epochs": epochs})
 
                     # Generate generalization metrics
-                    print(
-                        f'CSSRS Score for fold {fold_num}: {nnModel.metrics_names[1]} of {scores[1]}; {nnModel.metrics_names[3]} of {scores[3] * 100}%')
-                    print(
-                        f'UMD Score for fold {fold_num}: {nnModel.metrics_names[2]} of {scores[2]}; {nnModel.metrics_names[5]} of {scores[5] * 100}%')
+                    print("Keras Scores:")
+                    print(f'CSSRS Score for fold {fold_num}: {nnModel.metrics_names[1]} of {scores[1]}; {nnModel.metrics_names[3]} of {scores[3] * 100}%, {nnModel.metrics_names[4]} of {scores[4]}')
+                    print(f'UMD Score for fold {fold_num}: {nnModel.metrics_names[2]} of {scores[2]}; {nnModel.metrics_names[5]} of {scores[5] * 100}%, {nnModel.metrics_names[6]} of {scores[6]}')
                 else:
 
                     train_CSSRS_auc = history['CSSRS_Output_auc']
@@ -813,10 +867,10 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                          "train_UMD_loss": train_UMD_loss, "val_UMD_loss": val_UMD_loss, "epochs": epochs})
 
                     # Generate generalization metrics of test fold
-                    print(
-                        f'CSSRS Score for fold {fold_num}: {nnModel[1]} of {scores[1]}; {nnModel[3]} of {scores[3] * 100}%')
-                    print(
-                        f'UMD Score for fold {fold_num}: {nnModel[2]} of {scores[2]}; {nnModel[5]} of {scores[5] * 100}%')
+                    print("Keras Scores:")
+                    print(f'CSSRS Score for fold {fold_num}: {nnModel[1]} of {scores[1]}; {nnModel[3]} of {scores[3] * 100}%, {nnModel[4]} of {scores[4]}')
+                    print(f'UMD Score for fold {fold_num}: {nnModel[2]} of {scores[2]}; {nnModel[5]} of {scores[5] * 100}%, {nnModel[6]} of {scores[6]}')
+
 
                 "----------------------------------"
 
@@ -824,6 +878,8 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                 acc_per_fold2.append(scores[5] * 100)
                 loss_per_fold1.append(scores[1])
                 loss_per_fold2.append(scores[2])
+                auc_per_fold1.append(scores[4])
+                auc_per_fold2.append(scores[6])
 
                 fold_hyper.append(hyperparameters)
 
@@ -852,8 +908,28 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                 y_test_fold1copy = y_test_fold1.numpy().tolist()
                 y_test_fold2copy = y_test_fold2.numpy().tolist()
 
+                print()
+                print("SKLearn Scores:")
+                print("OvR w/ Macro Average")
+                print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold1, list_probs1, multi_class='ovr', average='macro')}")
+                print(f"UMD AUC for fold {fold_num} - {roc_auc_score(y_test_fold2, list_probs2, multi_class='ovr', average='macro')}")
+                # print("")
+                # print("OvR w/ Micro Average")
+                # print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold1, list_probs1, multi_class='ovr', average='micro')}")
+                # print(f"UMD AUC for fold {fold_num} - {roc_auc_score(y_test_fold2, list_probs2, multi_class='ovr', average='micro')}")
+                print("")
+                print("OvR w/ Weighted Average")
+                print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold1, list_probs1, multi_class='ovr', average='weighted')}")
+                print(f"UMD AUC for fold {fold_num} - {roc_auc_score(y_test_fold2, list_probs2, multi_class='ovr', average='weighted')}")
+                print("")
+                print("OvO w/ Macro Average")
+                print(f"CSSRS AUC for fold {fold_num} - {roc_auc_score(y_test_fold1, list_probs1, multi_class='ovo', average='macro')}")
+                print(f"UMD AUC for fold {fold_num} - {roc_auc_score(y_test_fold2, list_probs2, multi_class='ovo', average='macro')}")
+
+
+
                 if len(list_probs1) < len(list_probs2):
-                    [list_probs1copy.append("") for x in range(len(list_probs2)-len(list_probs1))]
+                    [list_probs1copy.append("") for x in range(len(list_probs2) - len(list_probs1))]
                     [y_pred1copy.append("") for x in range(len(y_pred2) - len(y_pred1))]
                     [y_test_fold1copy.append("") for x in range(len(y_test_fold2copy) - len(y_test_fold1copy))]
                 elif len(list_probs1) > len(list_probs2):
@@ -861,19 +937,12 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                     [y_pred2copy.append("") for x in range(len(y_pred1) - len(y_pred2))]
                     [y_test_fold2copy.append("") for x in range(len(y_test_fold1copy) - len(y_test_fold2copy))]
 
-                print(len(list_probs1))
-                print(len(list_probs2))
-                print(len(y_pred1))
-                print(len(y_pred2))
-                print(len(y_test_fold1copy))
-                print(len(y_test_fold2copy))
-
                 whole_results = pd.concat(
                     [whole_results, pd.DataFrame({"Actual_CSSRS": y_test_fold1copy,
                                                   "Predicted_CSSRS": y_pred1copy,
-                                                  "PredictedProba_CSSRS": list_probs2copy, "Fold_CSSRS": fold_num,
+                                                  "PredictedProba_CSSRS": list_probs1copy, "Fold_CSSRS": fold_num,
                                                   "Actual_UMD": y_test_fold2copy, "Predicted_UMD": y_pred2copy,
-                                                  "PredictedProba_UMD": list_probs2copy, "Fold_UMD": fold_num})], ignore_index=True)
+                                                  "PredictedProba_UMD": list_probs2copy, "Fold_UMD": fold_num})],ignore_index=True)
 
                 print(classification_report(y_test_fold1, y_pred1))
                 print(classification_report(y_test_fold2, y_pred2))
@@ -906,13 +975,15 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
             print('Score per fold')
             for i in range(0, len(acc_per_fold1)):
                 print('------------------------------------------------------------------------')
-                print(f'> Fold {i + 1} - CSSRS - Loss: {loss_per_fold1[i]} - Accuracy: {acc_per_fold1[i]}%')
-                print(f'> Fold {i + 1} - UMD - Loss: {loss_per_fold2[i]} - Accuracy: {acc_per_fold2[i]}%')
+                print(f'> Fold {i + 1} - CSSRS - Loss: {loss_per_fold1[i]} - Accuracy: {acc_per_fold1[i]}% - AUC: {auc_per_fold1[i]}')
+                print(f'> Fold {i + 1} - UMD - Loss: {loss_per_fold2[i]} - Accuracy: {acc_per_fold2[i]}% - AUC: {auc_per_fold2[i]}')
             print('------------------------------------------------------------------------')
             print('Average scores for all folds:')
             print(f'> CSSRS - Accuracy: {np.mean(acc_per_fold1)} (+- {np.std(acc_per_fold1)})')
+            print(f'> CSSRS - AUC: {np.mean(auc_per_fold1)} (+- {np.std(auc_per_fold1)})')
             print(f'> CSSRS - Loss: {np.mean(loss_per_fold1)}')
             print(f'> UMD - Accuracy: {np.mean(acc_per_fold2)} (+- {np.std(acc_per_fold2)})')
+            print(f'> UMD - AUC: {np.mean(auc_per_fold2)} (+- {np.std(auc_per_fold2)})')
             print(f'> UMD - Loss: {np.mean(loss_per_fold2)}')
             print('------------------------------------------------------------------------')
 
@@ -922,12 +993,22 @@ def MultiTaskrun(outputPath, UMD_path, CSSRS_path, model_name, mlm_params, mlm_p
                 overallResults2 = getStatistics(outputPath, whole_results["Actual_UMD"], whole_results["PredictedProba_UMD"],
                                                whole_results["Predicted_UMD"], 4)
             else:
-                overallResults1 = getStatistics(outputPath,pd.Series(y_test_fold1.numpy().tolist()),
-                                                pd.Series(list_probs1),
-                                                pd.Series(y_pred1.tolist()), CSSRS_n_label)
-                overallResults2 = getStatistics(outputPath, pd.Series(y_test_fold2.numpy().tolist()),
-                                                pd.Series(list_probs2),
-                                                pd.Series(y_pred2.tolist()), 4)
+                CSSRS_df = whole_results.iloc[:, :4]
+                CSSRS_df = CSSRS_df[(CSSRS_df["Actual_CSSRS"].isna() == False) & (CSSRS_df["Actual_CSSRS"] != "")]
+                CSSRS_df = CSSRS_df.astype({"Actual_CSSRS": "int", "Predicted_CSSRS": "int"})
+                # CSSRS_df["PredictedProba_CSSRS"] = CSSRS_df["PredictedProba_CSSRS"].apply(
+                #     lambda s: [float(x.strip(' []')) for x in s.split(",")])
+                #                 print(CSSRS_df)
+
+                UMD_df = whole_results.iloc[:, 4:]
+                UMD_df = UMD_df[(UMD_df["Actual_UMD"].isna() == False) & (UMD_df["Actual_UMD"] != "")]
+                UMD_df = UMD_df.astype({"Actual_UMD": "int", "Predicted_UMD": "int"})
+                #                 print(UMD_df)
+
+                overallResults1 = getStatistics(outputPath, CSSRS_df["Actual_CSSRS"], CSSRS_df["PredictedProba_CSSRS"],
+                                                CSSRS_df["Predicted_CSSRS"], CSSRS_n_label)
+                overallResults2 = getStatistics(outputPath, UMD_df["Actual_UMD"], UMD_df["PredictedProba_UMD"],
+                                                UMD_df["Predicted_UMD"], 4)
 
 
             # whole_results.to_csv(os.path.join(outputPath, "Actual_vs_Predicted.csv"), index=False)

@@ -30,6 +30,9 @@ def multiclass_ROC_AUC(y_test, y_pred_proba, n_classes):
 def getStatistics(outputPath, y_test, y_pred_proba, y_pred, n_lab):
     y_pred_proba = np.array(y_pred_proba.tolist())
 
+    if n_lab != 4:
+        y_pred_proba = [x[1] for x in y_pred_proba]
+
     # Multi-label
     print(classification_report(y_test, y_pred))
     # contains precision, recall, and f1 score for each class

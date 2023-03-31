@@ -2,7 +2,7 @@
 
 from Libraries import *
 from StatisticsFunctions import multiclass_ROC_AUC
-from EmbeddingFunctions import getTokens
+# from EmbeddingFunctions import getTokens
 
 class E2ESentenceTransformer(tf.keras.Model):
     def __init__(self, model_name_or_path, num_labels, **kwargs):
